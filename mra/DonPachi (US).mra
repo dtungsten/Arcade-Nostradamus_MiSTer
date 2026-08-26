@@ -1,12 +1,12 @@
 <misterromdescription>
   <name>DonPachi (US)</name>
-  <mameversion>0226</mameversion>
+  <mameversion>0289</mameversion>
   <setname>donpachi</setname>
   <year>1995</year>
   <manufacturer>CAVE</manufacturer>
   <category>Shooter</category>
   <rotation>vertical (ccw)</rotation>
-  <rbf>Cave</rbf>
+  <rbf>cave</rbf>
 
   <!-- ROM data -->
   <rom index="0" zip="donpachi.zip" md5="none" address="0x30000000">
@@ -48,7 +48,10 @@
   </rom>
 
   <!-- NVRAM -->
-  <nvram index="2" size="128" />
+  <nvram index="2" size="254" />
 
-  <buttons names="Shots/Laser,Spread/Laser Bomber,Full-Auto,-,Start,Coin,Pause" default="A,B,X,R,L,Start" />
+  <!-- high-score RAM: start, length, first/last initialization bytes -->
+  <rom index="4"><part>00 10 17 82 00 04 00 00 00 10 18 46 00 5A 00 01</part></rom>
+
+  <buttons names="Shot/Laser,Bomb,Full-Auto,-,Start,Coin,Pause,-,-,SS" default="A,B,X,,R,L,Start" />
 </misterromdescription>

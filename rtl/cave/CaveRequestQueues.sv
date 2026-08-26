@@ -6,12 +6,14 @@
 // Queues 16-bit framebuffer writes and coalesces adjacent pixels onto the 64-bit DDR write bus.
 module CaveSpriteFramebufferRequestQueue (
   input         clock,
+  input         reset,
   input         io_enable,
   input         io_readClock,
   input         io_in_wr,
   input  [16:0] io_in_addr,
   input  [15:0] io_in_din,
   output        io_in_wait_n,
+  output        io_idle,
   output        io_out_wr,
   output [31:0] io_out_addr,
   output [7:0]  io_out_mask,
@@ -81,7 +83,7 @@ module CaveSpriteFramebufferRequestQueue (
     io_in_wr & (samePending | ~pendingValid | fifo_enq_ready);
 
   always @(posedge clock) begin
-    if (~io_enable) begin
+    if (reset | ~io_enable) begin
       pendingValid <= 1'b0;
       pendingAddr <= 15'd0;
       pendingMask <= 8'd0;
@@ -122,7 +124,7 @@ module CaveSpriteFramebufferRequestQueue (
     .deq_valid   (fifo_deq_valid),
     .deq_bits    (fifo_deq_bits),
     .enq_ready   (fifo_enq_ready),
-    .enq_valid   (flushPending),
+    .enq_valid   (flushPending & ~reset),
     .enq_bits    (fifo_enq_bits)
   );
 
@@ -131,16 +133,19 @@ module CaveSpriteFramebufferRequestQueue (
   assign io_out_addr = {14'b0, fifo_deq_addr, 3'b000};
   assign io_out_mask = fifo_deq_mask;
   assign io_out_din = fifo_deq_din;
+  assign io_idle = ~pendingValid & ~fifo_deq_valid;
 endmodule
 
 // Queues 32-bit framebuffer writes and expands them onto the 64-bit DDR write bus.
 module CaveSystemFramebufferRequestQueue (
   input         clock,
+  input         reset,
   input         io_enable,
   input         io_readClock,
   input         io_in_wr,
   input  [16:0] io_in_addr,
   input  [31:0] io_in_din,
+  output        io_idle,
   output        io_out_wr,
   output [31:0] io_out_addr,
   output [7:0]  io_out_mask,
@@ -165,7 +170,7 @@ module CaveSystemFramebufferRequestQueue (
     .deq_valid   (fifo_deq_valid),
     .deq_bits    (fifo_deq_bits),
     .enq_ready   (fifo_enq_ready_unused),
-    .enq_valid   (io_in_wr),
+    .enq_valid   (io_in_wr & io_enable & ~reset),
     .enq_bits    (fifo_enq_bits)
   );
 
@@ -173,4 +178,5 @@ module CaveSystemFramebufferRequestQueue (
   assign io_out_addr = {13'b0, fifo_deq_addr, 2'b00};
   assign io_out_mask = fifo_deq_addr[0] ? {fifo_deq_mask, 4'b0000} : {4'b0000, fifo_deq_mask};
   assign io_out_din = {2{fifo_deq_din}};
+  assign io_idle = ~fifo_deq_valid;
 endmodule

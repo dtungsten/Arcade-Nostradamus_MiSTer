@@ -6,6 +6,8 @@ module SpriteFrameBuffer(
   input         reset,
   input         io_videoClock,
   input         io_enable,
+  input         io_ss_hold,
+  input         io_ss_canonicalize,
   input         io_swap,
   input  [8:0]  io_video_pos_y,
   input  [8:0]  io_video_regs_size_x,
@@ -26,7 +28,8 @@ module SpriteFrameBuffer(
   input         io_ddr_wait_n,
   input         io_ddr_valid,
   output [7:0]  io_ddr_burstLength,
-  input         io_ddr_burstDone
+  input         io_ddr_burstDone,
+  output        io_ss_idle
 );
   wire        lineBuffer_wr;
   wire [6:0]  lineBuffer_addr;
@@ -40,20 +43,24 @@ module SpriteFrameBuffer(
   wire        lineBufferDma_in_valid;
   wire        lineBufferDma_in_burstDone;
   wire [31:0] lineBufferDma_out_addr;
+  wire        lineBufferDma_busy;
 
-  wire        frameBufferDma_start = io_enable & io_swap;
+  wire        frameBufferDma_start;
   wire        frameBufferDma_out_wr;
   wire [31:0] frameBufferDma_out_addr;
   wire [63:0] frameBufferDma_out_din;
   wire [7:0]  frameBufferDma_out_burstLength;
   wire        frameBufferDma_out_wait_n;
   wire        frameBufferDma_out_burstDone;
+  wire        frameBufferDma_busy;
 
   wire        queue_out_wr;
   wire [31:0] queue_out_addr;
   wire [7:0]  queue_out_mask;
   wire [63:0] queue_out_din;
   wire        queue_out_wait_n;
+  wire        queue_idle;
+  wire        ddrArbiter_idle;
 
   wire [31:0] page_addrRead;
   wire [31:0] page_addrWrite;
@@ -67,14 +74,34 @@ module SpriteFrameBuffer(
   reg hBlank_r;
   reg hBlank;
   reg hBlankPrev;
+  reg enableReg;
+
+  wire localReset = reset | io_ss_canonicalize;
 
   always @(posedge clock) begin
-    hBlank_r <= io_video_hBlank;
-    hBlank <= hBlank_r;
-    hBlankPrev <= hBlank;
+    if (reset)
+      enableReg <= 1'b0;
+    else
+      enableReg <= io_enable;
   end
 
-  assign lineBufferDma_start = io_enable & hBlank & ~hBlankPrev;
+  assign frameBufferDma_start = enableReg & ~io_ss_hold & io_swap;
+
+  always @(posedge clock) begin
+    if (localReset) begin
+      hBlank_r <= 1'b0;
+      hBlank <= 1'b0;
+      hBlankPrev <= 1'b0;
+    end
+    else begin
+      hBlank_r <= io_video_hBlank;
+      hBlank <= hBlank_r;
+      hBlankPrev <= hBlank;
+    end
+  end
+
+  assign lineBufferDma_start =
+    enableReg & ~io_ss_hold & hBlank & ~hBlankPrev;
   assign lineBuffer_addr = lineBufferDma_out_addr[9:3];
 
   CaveTrueDualPortRam #(
@@ -104,7 +131,7 @@ module SpriteFrameBuffer(
     .SUPPORT_TRIPLE_BUFFER (1'b0)
   ) pageFlipper (
     .clock        (clock),
-    .reset        (reset),
+    .reset        (localReset),
     .io_mode      (1'b0),
     .io_swapRead  (1'b0),
     .io_swapWrite (frameBufferDma_start),
@@ -114,8 +141,9 @@ module SpriteFrameBuffer(
 
   CaveFramebufferLineReadDma lineBufferDma (
     .clock           (clock),
-    .reset           (reset),
+    .reset           (localReset),
     .io_start        (lineBufferDma_start),
+    .io_busy         (lineBufferDma_busy),
     .io_in_rd        (lineBufferDma_in_rd),
     .io_in_addr      (lineBufferDma_in_addr),
     .io_in_dout      (lineBufferDma_in_dout),
@@ -129,12 +157,14 @@ module SpriteFrameBuffer(
 
   CaveSpriteFramebufferRequestQueue queue (
     .clock         (clock),
-    .io_enable     (io_enable),
+    .reset         (localReset),
+    .io_enable     (enableReg),
     .io_readClock  (clock),
     .io_in_wr      (io_frameBuffer_wr),
     .io_in_addr    (io_frameBuffer_addr),
     .io_in_din     (io_frameBuffer_din),
     .io_in_wait_n  (io_frameBuffer_wait_n),
+    .io_idle       (queue_idle),
     .io_out_wr     (queue_out_wr),
     .io_out_addr   (queue_out_addr),
     .io_out_mask   (queue_out_mask),
@@ -144,10 +174,11 @@ module SpriteFrameBuffer(
 
   CaveFramebufferClearDma frameBufferDma (
     .clock            (clock),
-    .reset            (reset),
+    .reset            (localReset),
     .io_start         (frameBufferDma_start),
     .io_wordsPerLine  (clearWordsPerLine),
     .io_lines         (clearLines),
+    .io_busy          (frameBufferDma_busy),
     .io_out_wr        (frameBufferDma_out_wr),
     .io_out_addr      (frameBufferDma_out_addr),
     .io_out_din       (frameBufferDma_out_din),
@@ -164,7 +195,7 @@ module SpriteFrameBuffer(
 
   CaveSpriteFramebufferDdrArbiter ddrArbiter (
     .clock              (clock),
-    .reset              (reset),
+    .reset              (localReset),
     .io_in_0_rd         (lineBufferDma_in_rd),
     .io_in_0_addr       (ddr_lineBuffer_addr),
     .io_in_0_dout       (lineBufferDma_in_dout),
@@ -191,6 +222,13 @@ module SpriteFrameBuffer(
     .io_out_wait_n      (io_ddr_wait_n),
     .io_out_valid       (io_ddr_valid),
     .io_out_burstLength (io_ddr_burstLength),
-    .io_out_burstDone   (io_ddr_burstDone)
+    .io_out_burstDone   (io_ddr_burstDone),
+    .io_idle            (ddrArbiter_idle)
   );
+
+  assign io_ss_idle =
+    ~lineBufferDma_busy &
+    ~frameBufferDma_busy &
+    queue_idle &
+    ddrArbiter_idle;
 endmodule

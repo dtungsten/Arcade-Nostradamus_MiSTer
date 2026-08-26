@@ -86,7 +86,12 @@ module ChannelController(
   output [23:0] io_rom_addr,
   input  [7:0]  io_rom_dout,
   input         io_rom_wait_n,
-  input         io_rom_valid
+  input         io_rom_valid,
+  input         io_ss_hold,
+  input         io_ss_restore_enable,
+  output        io_ss_idle,
+  cave_ssbus_if.slave io_ss_channel_bus,
+  cave_ssbus_if.slave io_ss_scheduler_bus
 );
   localparam [3:0] STATE_INIT    = 4'd0;
   localparam [3:0] STATE_IDLE    = 4'd1;
@@ -160,6 +165,7 @@ module ChannelController(
   wire [15:0] audioPipeline_io_out_bits_state_loopSample;
   wire [16:0] audioPipeline_io_out_bits_audio_left;
   wire        audioPipeline_io_pcmData_ready;
+  wire        audioPipelineIdle;
 
   wire audioPipelineInputValid = stateReady;
   wire pcmDataFire = audioPipeline_io_pcmData_ready & io_rom_valid;
@@ -203,6 +209,31 @@ module ChannelController(
   };
   wire [120:0] channelStateMemWriteData =
     stateWrite ? currentChannelState : defaultChannelState;
+
+  wire        saveStateEnable = io_ss_hold & io_ss_idle;
+  wire        channelStateRamRd;
+  wire        channelStateRamWr;
+  wire [2:0]  channelStateRamAddr;
+  wire [120:0] channelStateRamWriteData;
+  wire        schedulerRestoreWr;
+  wire [31:0] schedulerRestoreAddr;
+  wire [63:0] schedulerRestoreData;
+  wire [63:0] schedulerStateWord0 = {
+    24'h594D53,
+    6'd0,
+    stateReg,
+    channelCounter,
+    outputCounter,
+    accumulatorReg_left,
+    pendingReg
+  };
+  wire [63:0] schedulerStateWord1 = currentChannelState[63:0];
+  wire [63:0] schedulerStateWord2 = {7'd0, currentChannelState[120:64]};
+  wire [191:0] schedulerState = {
+    schedulerStateWord2,
+    schedulerStateWord1,
+    schedulerStateWord0
+  };
 
   wire        mem_enable = channelStateMemReadData[120];
   wire        mem_active = channelStateMemReadData[119];
@@ -354,16 +385,74 @@ module ChannelController(
       stateReg <= STATE_INIT;
       channelCounter <= 3'd0;
       outputCounter <= 9'd0;
+      accumulatorReg_left <= 17'd0;
       pendingReg <= 1'b0;
+      channelStateReg_enable <= 1'b0;
+      channelStateReg_active <= 1'b0;
+      channelStateReg_done <= 1'b0;
+      channelStateReg_nibble <= 1'b0;
+      channelStateReg_addr <= 24'd0;
+      channelStateReg_loopStart <= 1'b0;
+      channelStateReg_audioPipelineState_samples_0 <= 16'd0;
+      channelStateReg_audioPipelineState_samples_1 <= 16'd0;
+      channelStateReg_audioPipelineState_underflow <= 1'b1;
+      channelStateReg_audioPipelineState_adpcmStep <= 16'h007F;
+      channelStateReg_audioPipelineState_lerpIndex <= 10'd0;
+      channelStateReg_audioPipelineState_loopEnable <= 1'b0;
+      channelStateReg_audioPipelineState_loopStep <= 16'd0;
+      channelStateReg_audioPipelineState_loopSample <= 16'd0;
     end
-    else begin
+    else if (schedulerRestoreWr) begin
+      case (schedulerRestoreAddr)
+        32'd0: begin
+          if (schedulerRestoreData[63:40] == 24'h594D53) begin
+            stateReg <= schedulerRestoreData[33:30];
+            channelCounter <= schedulerRestoreData[29:27];
+            outputCounter <= schedulerRestoreData[26:18];
+            accumulatorReg_left <= schedulerRestoreData[17:1];
+            pendingReg <= schedulerRestoreData[0];
+          end
+        end
+        32'd1: begin
+          channelStateReg_audioPipelineState_samples_0[3:0] <=
+            schedulerRestoreData[63:60];
+          channelStateReg_audioPipelineState_underflow <=
+            schedulerRestoreData[59];
+          channelStateReg_audioPipelineState_adpcmStep <=
+            schedulerRestoreData[58:43];
+          channelStateReg_audioPipelineState_lerpIndex <=
+            schedulerRestoreData[42:33];
+          channelStateReg_audioPipelineState_loopEnable <=
+            schedulerRestoreData[32];
+          channelStateReg_audioPipelineState_loopStep <=
+            schedulerRestoreData[31:16];
+          channelStateReg_audioPipelineState_loopSample <=
+            schedulerRestoreData[15:0];
+        end
+        32'd2: begin
+          channelStateReg_enable <= schedulerRestoreData[56];
+          channelStateReg_active <= schedulerRestoreData[55];
+          channelStateReg_done <= schedulerRestoreData[54];
+          channelStateReg_nibble <= schedulerRestoreData[53];
+          channelStateReg_addr <= schedulerRestoreData[52:29];
+          channelStateReg_loopStart <= schedulerRestoreData[28];
+          channelStateReg_audioPipelineState_samples_1 <=
+            schedulerRestoreData[27:12];
+          channelStateReg_audioPipelineState_samples_0[15:4] <=
+            schedulerRestoreData[11:0];
+        end
+        default: begin
+        end
+      endcase
+    end
+    else if (!(io_ss_hold && io_ss_idle)) begin
       case (stateReg)
         STATE_INIT: begin
           if (channelCounterWrap)
             stateReg <= STATE_IDLE;
         end
         STATE_IDLE: begin
-          if (io_enable)
+          if (io_enable && !io_ss_hold)
             stateReg <= STATE_READ;
         end
         STATE_READ: begin
@@ -466,19 +555,59 @@ module ChannelController(
     end
   end
 
+  CaveSaveStateWideRamPort #(
+    .WIDTH      (121),
+    .ADDR_WIDTH (3),
+    .SS_IDX     (8'd30)
+  ) channelStateSaveState (
+    .clk            (clock),
+    .reset          (reset),
+    .state_enable   (saveStateEnable),
+    .restore_enable (io_ss_restore_enable),
+    .normal_rd      (stateRead),
+    .normal_wr      (channelStateMemWriteEnable),
+    .normal_addr    (channelCounter),
+    .normal_data    (channelStateMemWriteData),
+    .ram_rd         (channelStateRamRd),
+    .ram_wr         (channelStateRamWr),
+    .ram_addr       (channelStateRamAddr),
+    .ram_data       (channelStateRamWriteData),
+    .ram_q          (channelStateMemReadData),
+    .blocked_access (),
+    .ssbus          (io_ss_channel_bus)
+  );
+
+  CaveSaveStateRegisterPort #(
+    .WIDTH        (64),
+    .COUNT        (3),
+    .SS_IDX       (8'd31),
+    .STREAM_WIDTH (2'd3)
+  ) schedulerSaveState (
+    .clk            (clock),
+    .reset          (reset),
+    .state_enable   (saveStateEnable),
+    .restore_enable (io_ss_restore_enable),
+    .capture_data   (schedulerState),
+    .restore_wr     (schedulerRestoreWr),
+    .restore_addr   (schedulerRestoreAddr),
+    .restore_data   (schedulerRestoreData),
+    .blocked_access (),
+    .ssbus          (io_ss_scheduler_bus)
+  );
+
   CaveSyncReadMem #(
     .ADDR_WIDTH (3),
     .DATA_WIDTH (121),
     .DEPTH      (8)
   ) channelStateMem_ext (
-    .read_addr  (channelCounter),
-    .read_en    (stateRead),
+    .read_addr  (channelStateRamAddr),
+    .read_en    (channelStateRamRd),
     .read_clk   (clock),
     .read_data  (channelStateMemReadData),
-    .write_addr (channelCounter),
-    .write_en   (channelStateMemWriteEnable),
+    .write_addr (channelStateRamAddr),
+    .write_en   (channelStateRamWr),
     .write_clk  (clock),
-    .write_data (channelStateMemWriteData)
+    .write_data (channelStateRamWriteData)
   );
 
   AudioPipeline audioPipeline (
@@ -510,14 +639,16 @@ module ChannelController(
     .io_pcmData_ready             (audioPipeline_io_pcmData_ready),
     .io_pcmData_valid             (io_rom_valid),
     .io_pcmData_bits              (audioPipeline_io_pcmData_bits),
-    .io_loopStart                 (channelStateReg_loopStart)
+    .io_loopStart                 (channelStateReg_loopStart),
+    .io_idle                      (audioPipelineIdle)
   );
 
   assign io_done = stateCheck & channelStateReg_done;
   assign io_index = channelCounter;
-  assign io_audio_valid = outputCounterWrap;
+  assign io_audio_valid = outputCounterWrap & ~io_ss_hold;
   assign io_audio_bits_left =
     (accumulatorLowClamped < 17'sh07FFF) ? accumulatorLowClamped[15:0] : 16'h7FFF;
   assign io_rom_rd = audioPipeline_io_pcmData_ready & ~pendingReg;
   assign io_rom_addr = channelStateReg_addr;
+  assign io_ss_idle = stateIdle & audioPipelineIdle & ~pendingReg;
 endmodule

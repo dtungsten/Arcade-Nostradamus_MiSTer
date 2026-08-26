@@ -1,11 +1,12 @@
 <misterromdescription>
   <name>Thunder Heroes (set 1)</name>
-  <mameversion>0226</mameversion>
+  <mameversion>0289</mameversion>
   <setname>theroes</setname>
   <year>2001</year>
   <manufacturer>CAVE</manufacturer>
+  <rotation>horizontal</rotation>
   <category>Fighting</category>
-  <rbf>Cave</rbf>
+  <rbf>cave</rbf>
 
   <!-- ROM data -->
   <rom index="0" zip="theroes.zip" md5="none" address="0x30000000">
@@ -47,7 +48,7 @@
     <part>0140 00e0 0024 0018 0014 0002 0000 0000</part>
   </rom>
 
-  <buttons names="B0,B1,B2,B3,Start,Coin,Pause" default="A,B,X,Y,R,L,Start" />
+  <buttons names="Punch,Kick,Jump,Special,Start,Coin,Pause,-,-,SS" default="A,B,X,Y,R,L,Start" />
 
   <!-- DIPs -->
   <switches default="ff,ff">

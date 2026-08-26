@@ -30,6 +30,7 @@ module SpriteProcessor(
   output [15:0]  io_frameBuffer_din,
   input          io_frameBuffer_wait_n,
   output         io_ctrl_frameReady,
+  output         io_ss_idle,
   output [63:0] io_debug
 );
   localparam [2:0] STATE_IDLE    = 3'd0;
@@ -97,6 +98,8 @@ module SpriteProcessor(
   wire        pwrinst2TileRomValid;
   wire [63:0] pwrinst2TileRomDout;
   wire        pwrinst2TileRomBurstDone;
+  wire        pwrinst2DecryptorIdle;
+  wire        decoderIdle;
   wire [7:0]  blitterPixelData0;
   wire [7:0]  blitterPixelData1;
   wire [7:0]  blitterPixelData2;
@@ -375,7 +378,8 @@ module SpriteProcessor(
     .io_rom_valid       (io_ctrl_tileRom_valid),
     .io_rom_burstDone   (io_ctrl_tileRom_burstDone),
     .io_out_valid       (pwrinst2TileRomValid),
-    .io_out_dout        (pwrinst2TileRomDout)
+    .io_out_dout        (pwrinst2TileRomDout),
+    .io_idle            (pwrinst2DecryptorIdle)
   );
 
   SpriteBlitter blitter (
@@ -431,6 +435,7 @@ module SpriteProcessor(
     .io_tileRom_bits      (fifoDeqBits),
     .io_pixelData_ready   (blitterPixelDataReady),
     .io_pixelData_valid   (blitterPixelDataValid),
+    .io_idle              (decoderIdle),
     .io_pixelData_bits_0  (blitterPixelData0),
     .io_pixelData_bits_1  (blitterPixelData1),
     .io_pixelData_bits_2  (blitterPixelData2),
@@ -456,6 +461,13 @@ module SpriteProcessor(
   assign io_ctrl_tileRom_burstLength =
     io_ctrl_pwrinst2 ? pwrinst2TileRomBurstLength : {2'b00, tileRomBurstLength};
   assign io_ctrl_frameReady = frameReadyReg;
+  assign io_ss_idle =
+    (stateReg == STATE_IDLE) &
+    ~readPendingReg &
+    (fifoCount == 7'd0) &
+    ~blitterBusy &
+    decoderIdle &
+    pwrinst2DecryptorIdle;
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
   assign io_debug = {
     debugAbcSlot162CodeLatched,
@@ -488,7 +500,8 @@ module PwrInst2SpriteRomDecryptor(
   input          io_rom_valid,
   input          io_rom_burstDone,
   output         io_out_valid,
-  output [63:0]  io_out_dout
+  output [63:0]  io_out_dout,
+  output         io_idle
 );
   reg        busyReg;
   reg        rawReadPendingReg;
@@ -620,4 +633,5 @@ module PwrInst2SpriteRomDecryptor(
   assign io_rom_burstLength = 8'd1;
   assign io_out_valid = outValidReg;
   assign io_out_dout = outDoutReg;
+  assign io_idle = ~busyReg & ~rawReadPendingReg & ~outValidReg;
 endmodule

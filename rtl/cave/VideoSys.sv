@@ -183,12 +183,17 @@ module VideoSys(
     .io_mem_addr (videoRegAddr),
     .io_mem_mask (videoRegMask),
     .io_mem_din  (videoRegDin),
+    .io_ss_wr    (1'b0),
+    .io_ss_addr  (3'd0),
+    .io_ss_din   (16'd0),
     .io_regs_0   (videoReg0),
     .io_regs_1   (videoReg1),
     .io_regs_2   (videoReg2),
     .io_regs_3   (videoReg3),
     .io_regs_4   (videoReg4),
-    .io_regs_5   (videoReg5)
+    .io_regs_5   (videoReg5),
+    .io_regs_6   (),
+    .io_regs_7   ()
   );
 
   CaveVideoTiming #(

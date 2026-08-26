@@ -6,6 +6,8 @@ module SystemFrameBuffer(
   input         reset,
   input         io_videoClock,
   input         io_enable,
+  input         io_ss_hold,
+  input         io_ss_canonicalize,
   input         io_rotate,
   input         io_forceBlank,
   input         io_video_vBlank,
@@ -26,7 +28,8 @@ module SystemFrameBuffer(
   output [31:0] io_ddr_addr,
   output [7:0]  io_ddr_mask,
   output [63:0] io_ddr_din,
-  input         io_ddr_wait_n
+  input         io_ddr_wait_n,
+  output        io_ss_idle
 );
   wire [8:0]  frameWidth = io_rotate ? io_video_regs_size_y : io_video_regs_size_x;
   wire [8:0]  frameHeight = io_rotate ? io_video_regs_size_x : io_video_regs_size_y;
@@ -37,6 +40,7 @@ module SystemFrameBuffer(
   wire [31:0] pageAddrWrite;
 
   wire [31:0] queueAddr;
+  wire        queueIdle;
 
   reg frameCtrlVBlank_r;
   reg frameCtrlVBlank;
@@ -45,24 +49,38 @@ module SystemFrameBuffer(
   reg videoVBlank;
   reg videoVBlankPrev;
 
+  wire localReset = reset | io_ss_canonicalize;
+
   always @(posedge clock) begin
-    frameCtrlVBlank_r <= io_frameBufferCtrl_vBlank;
-    frameCtrlVBlank <= frameCtrlVBlank_r;
-    frameCtrlVBlankPrev <= frameCtrlVBlank;
-    videoVBlank_r <= io_video_vBlank;
-    videoVBlank <= videoVBlank_r;
-    videoVBlankPrev <= videoVBlank;
+    if (localReset) begin
+      frameCtrlVBlank_r <= 1'b0;
+      frameCtrlVBlank <= 1'b0;
+      frameCtrlVBlankPrev <= 1'b0;
+      videoVBlank_r <= 1'b0;
+      videoVBlank <= 1'b0;
+      videoVBlankPrev <= 1'b0;
+    end
+    else begin
+      frameCtrlVBlank_r <= io_frameBufferCtrl_vBlank;
+      frameCtrlVBlank <= frameCtrlVBlank_r;
+      frameCtrlVBlankPrev <= frameCtrlVBlank;
+      videoVBlank_r <= io_video_vBlank;
+      videoVBlank <= videoVBlank_r;
+      videoVBlankPrev <= videoVBlank;
+    end
   end
 
-  assign pageSwapRead = frameCtrlVBlank & ~frameCtrlVBlankPrev;
-  assign pageSwapWrite = videoVBlank & ~videoVBlankPrev;
+  assign pageSwapRead =
+    ~io_ss_hold & frameCtrlVBlank & ~frameCtrlVBlankPrev;
+  assign pageSwapWrite =
+    ~io_ss_hold & videoVBlank & ~videoVBlankPrev;
 
   CavePageFlipper #(
     .BASE_PAGE             (11'h120),
     .SUPPORT_TRIPLE_BUFFER (1'b1)
   ) pageFlipper (
     .clock        (clock),
-    .reset        (reset),
+    .reset        (localReset),
     .io_mode      (pageMode),
     .io_swapRead  (pageSwapRead),
     .io_swapWrite (pageSwapWrite),
@@ -72,11 +90,13 @@ module SystemFrameBuffer(
 
   CaveSystemFramebufferRequestQueue queue (
     .clock         (io_videoClock),
+    .reset         (localReset),
     .io_enable     (io_enable),
     .io_readClock  (clock),
     .io_in_wr      (io_frameBuffer_wr),
     .io_in_addr    (io_frameBuffer_addr),
     .io_in_din     (io_frameBuffer_din),
+    .io_idle       (queueIdle),
     .io_out_wr     (io_ddr_wr),
     .io_out_addr   (queueAddr),
     .io_out_mask   (io_ddr_mask),
@@ -90,4 +110,5 @@ module SystemFrameBuffer(
   assign io_frameBufferCtrl_stride = {3'h0, frameWidth, 2'h0};
   assign io_frameBufferCtrl_forceBlank = io_forceBlank;
   assign io_ddr_addr = 32'(queueAddr + pageAddrWrite);
+  assign io_ss_idle = queueIdle;
 endmodule

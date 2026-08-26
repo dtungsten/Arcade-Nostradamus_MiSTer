@@ -27,3 +27,55 @@ quartus/rtl/cave/Cave.fir
 test_run_dir
 .DS_Store
 nvram/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Quartus diagnostic and generated products
+/output_files*/
+*.rpt
+*.summary
+*.smsg
+*.done
+*.pin
+*.jdi
+*.sof
+*.sld
+/Arcade-Cave-*.rbf
+
+# One-off local diagnostic project revisions
+/Arcade-Cave-*Diag.qpf
+/Arcade-Cave-*Diag.qsf
+/Arcade-Cave-*Debug.qpf
+/Arcade-Cave-*Debug.qsf
+/Arcade-Cave-STPBoot*.qpf
+/Arcade-Cave-STPBoot*.qsf
+/files_*_debug.qip
+
+# Development-only trees archived in MiSTer Docs
+/rtl/pwrinst2_release/
+/sim/
+/tools/
+
+# Retained regression for the Cave-local high-score NVRAM manager.
+!/sim/
+/sim/*
+!/sim/highscore/
+/sim/highscore/*
+!/sim/highscore/*.sv
+!/sim/highscore/run.ps1
+
+# ModelSim, Verilator, and waveform output
+obj_dir/
+modelsim.ini
+transcript
+vsim.wlf
+*.vcd
+*.fst
+*.log
+*.pid
+*.stdout.txt
+*.stderr.txt
+
+/.codex*askpass*

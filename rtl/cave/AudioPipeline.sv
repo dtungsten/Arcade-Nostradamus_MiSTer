@@ -31,7 +31,8 @@ module AudioPipeline(
   output        io_pcmData_ready,
   input         io_pcmData_valid,
   input  [3:0]  io_pcmData_bits,
-  input         io_loopStart
+  input         io_loopStart,
+  output        io_idle
 );
   localparam [2:0] STATE_IDLE        = 3'd0;
   localparam [2:0] STATE_CHECK       = 3'd1;
@@ -194,4 +195,5 @@ module AudioPipeline(
   assign io_out_bits_state_loopSample = inputReg_state_loopSample;
   assign io_out_bits_audio_left = audioReg_left;
   assign io_pcmData_ready = fetch;
+  assign io_idle = idle;
 endmodule

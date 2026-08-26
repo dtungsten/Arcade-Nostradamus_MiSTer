@@ -10,6 +10,7 @@ module CaveLayerProcessor #(
   input         io_ctrl_enable,
   input  [1:0]  io_ctrl_format,
   input         io_ctrl_zero4bppPenF,
+  input         io_ctrl_pwrinst2,
   input         io_ctrl_regs_tileSize,
   input         io_ctrl_regs_enable,
   input         io_ctrl_regs_flipX,
@@ -81,7 +82,10 @@ module CaveLayerProcessor #(
   wire [4:0] layerOffsetX5 =
     io_ctrl_regs_flipX ? (layerOffsetBase + 5'h01) : layerOffsetBase;
   wire [8:0] layerOffsetX = {4'h0, layerOffsetX5};
-  wire [8:0] layerOffsetY = {8'hF7, io_ctrl_regs_flipY};
+  wire [8:0] layerOffsetY =
+    9'h1EE +
+    {8'h00, io_ctrl_regs_flipY} +
+    {8'h00, io_ctrl_pwrinst2};
 
   wire [8:0] normalPosX =
     io_video_pos_x + io_ctrl_regs_scroll_x - io_spriteOffset_x - layerOffsetX;

@@ -26,11 +26,12 @@ module Cave(
   input         options_ym_fm,
   input         options_oki_0,
   input         options_oki_1,
-  input  [2:0]  options_pwrinst2_oki0_level,
-  input  [2:0]  options_pwrinst2_oki1_level,
+  input  [3:0]  options_pwrinst2_oki0_level,
+  input  [3:0]  options_pwrinst2_oki1_level,
   input         options_pwrinst2_headroom,
-  input  [2:0]  options_pwrinst2_psg_level,
-  input  [2:0]  options_pwrinst2_fm_level,
+  input  [3:0]  options_pwrinst2_psg_level,
+  input  [3:0]  options_pwrinst2_fm_level,
+  input  [3:0]  options_ymz_level,
   input         player_0_up,
   input         player_0_down,
   input         player_0_left,
@@ -47,6 +48,16 @@ module Cave(
   input         player_1_start,
   input         player_1_coin,
   input         player_1_pause,
+  input         ss_save_request,
+  input         ss_load_request,
+  input  [1:0]  ss_slot,
+  output        ss_available,
+  output        ss_active,
+  output        ss_busy,
+  output [3:0]  ss_state_debug,
+  output [3:0]  ss_last_error,
+  output [31:0] service_debug,
+  output [3:0]  game_index,
   input         ioctl_download,
   input         ioctl_upload,
   input         ioctl_rd,
@@ -56,6 +67,7 @@ module Cave(
   input  [26:0] ioctl_addr,
   output [15:0] ioctl_din,
   input  [15:0] ioctl_dout,
+  output        nvram_dirty,
   output        led_power,
   output        led_disk,
   output        led_user,
@@ -133,6 +145,14 @@ module Cave(
   wire         _gpu_io_systemFrameBuffer_wr;
   wire [16:0]  _gpu_io_systemFrameBuffer_addr;
   wire [31:0]  _gpu_io_systemFrameBuffer_din;
+  wire         _gpu_io_ss_idle;
+  wire         _gpu_io_ss_reconstruction_ready;
+  wire         _spriteFrameBuffer_io_ss_idle;
+  wire         _systemFrameBuffer_io_ss_idle;
+  wire         _layerTileRomCrossing0_io_ss_idle;
+  wire         _layerTileRomCrossing1_io_ss_idle;
+  wire         _layerTileRomCrossing2_io_ss_idle;
+  wire         _pwrinst2LayerTileRomCrossing_io_ss_idle;
   wire [7:0]   _sound_io_rom_0_dout;
   wire         _sound_io_rom_0_wait_n;
   wire         _sound_io_rom_0_valid;
@@ -161,6 +181,8 @@ module Cave(
   wire         _main_io_gpuMem_sprite_vram_rd;
   wire [11:0]  _main_io_gpuMem_sprite_vram_addr;
   wire [14:0]  _main_io_gpuMem_paletteRam_addr;
+  reg  [3:0]   gameIndexReg;
+  reg          gameIndexReg_latched;
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
   wire [63:0]  _main_io_debug_pipeline;
   wire [63:0]  _main_io_debug_cpu;
@@ -173,6 +195,48 @@ module Cave(
   wire [63:0]  _gpu_io_debug_readout;
   wire [23:0]  _gpu_io_debug_source_rgb;
 `endif
+`ifdef CAVE_PWRINST2_SOUND_DIAGNOSTICS
+  wire [255:0] _sound_io_hw_debug;
+  reg          pwrinst2DiagCoinD = 1'b0;
+  reg          pwrinst2DiagStartD = 1'b0;
+  reg  [15:0]  pwrinst2DiagCoinCount = 16'd0;
+  reg  [15:0]  pwrinst2DiagStartCount = 16'd0;
+  wire [10:0]  pwrinst2DiagInputs = {
+    player_0_up,
+    player_0_down,
+    player_0_left,
+    player_0_right,
+    player_0_buttons,
+    player_0_start,
+    player_0_coin,
+    player_0_pause
+  };
+  wire [63:0] pwrinst2DiagInputProbe = {
+    16'hC5D2,
+    gameIndexReg,
+    options_service,
+    pwrinst2DiagInputs,
+    pwrinst2DiagCoinCount,
+    pwrinst2DiagStartCount
+  };
+
+  always @(posedge clock) begin
+    if (reset) begin
+      pwrinst2DiagCoinD <= 1'b0;
+      pwrinst2DiagStartD <= 1'b0;
+      pwrinst2DiagCoinCount <= 16'd0;
+      pwrinst2DiagStartCount <= 16'd0;
+    end
+    else begin
+      pwrinst2DiagCoinD <= player_0_coin;
+      pwrinst2DiagStartD <= player_0_start;
+      if (player_0_coin && !pwrinst2DiagCoinD)
+        pwrinst2DiagCoinCount <= pwrinst2DiagCoinCount + 16'd1;
+      if (player_0_start && !pwrinst2DiagStartD)
+        pwrinst2DiagStartCount <= pwrinst2DiagStartCount + 16'd1;
+    end
+  end
+`endif
   wire [23:0]  _gpu_rgb;
   wire [15:0]  _main_io_soundCtrl_oki_0_dout;
   wire [15:0]  _main_io_soundCtrl_oki_1_dout;
@@ -184,6 +248,17 @@ module Cave(
   wire [15:0]  _main_io_eeprom_dout;
   wire         _main_io_eeprom_wait_n;
   wire         _main_io_eeprom_valid;
+  wire         _main_io_ss_capture_done;
+  wire         _main_io_ss_cpu_idle;
+  wire         _main_io_ss_clients_idle;
+  wire         _main_io_ss_restore_commit_done;
+  wire         _main_io_ss_reconstruction_ready;
+  wire         _main_io_ss_blocked_access;
+  wire         _sound_io_ss_idle;
+  wire         _sound_io_ss_capture_done;
+  wire         _sound_io_ss_cpu_idle;
+  wire         _sound_io_ss_restore_commit_done;
+  wire         _sound_io_ss_reconstruction_ready;
   wire         _main_io_gpuMem_layer_0_regs_tileSize;
   wire         _main_io_gpuMem_layer_0_regs_enable;
   wire         _main_io_gpuMem_layer_0_regs_flipX;
@@ -256,6 +331,10 @@ module Cave(
   wire         _main_io_eeprom_wr;
   wire [6:0]   _main_io_eeprom_addr;
   wire [15:0]  _main_io_eeprom_din;
+  wire [15:0]  _main_io_hs_nvram_din;
+  wire         _main_io_hs_nvram_wait_n;
+  wire         _main_io_hs_dirty;
+  wire         _main_io_hs_active;
   wire         _main_io_spriteFrameBufferSwap;
   wire         _gpu_io_spriteCtrl_frameReady;
   wire         _videoSys_io_prog_video_wr;
@@ -271,6 +350,8 @@ module Cave(
   wire         _memSys_io_prog_rom_wr;
   wire         _memSys_io_prog_nvram_rd;
   wire         _memSys_io_prog_nvram_wr;
+  wire [26:0]  _memSys_io_prog_nvram_addr;
+  wire [15:0]  _memSys_io_prog_nvram_din;
   wire         _memSys_io_prog_done;
   wire         _memSys_io_progRom_rd;
   wire [21:0]  _memSys_io_progRom_addr;
@@ -364,14 +445,22 @@ module Cave(
   wire         _ddr_1_io_mem_wait_n;
   wire         _ddr_1_io_mem_valid;
   wire         _ddr_1_io_mem_burstDone;
+  wire         _ddr_1_idle;
+  wire         _ddr_game_rd;
+  wire         _ddr_game_wr;
+  wire [31:0]  _ddr_game_addr;
+  wire [7:0]   _ddr_game_mask;
+  wire [63:0]  _ddr_game_din;
+  wire [7:0]   _ddr_game_burstLength;
+  wire [63:0]  _ddr_game_dout;
+  wire         _ddr_game_wait_n;
+  wire         _ddr_game_valid;
   wire         dipsRegsWr;
   wire [1:0]   dipsRegsAddr;
   wire [15:0]  _dipsRegs_io_regs_0;
   reg          videoVBlankPipe0;
   reg          videoVBlankPipe1;
   reg          videoVBlankPipe2;
-  reg  [3:0]   gameIndexReg;
-  reg          gameIndexReg_latched;
   reg          gameIndexCpuLoadToggle = 1'b0;
   (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
   reg          gameIndexCpuToggleSync0 = 1'b0;
@@ -403,6 +492,131 @@ module Cave(
   wire         gameIsPwrInst2;
   wire         gameIsPlegends;
   wire         rotateClockwise;
+
+`ifdef CAVE_HW_DIAGNOSTICS
+  wire [11:0]  memSysHwDebug;
+`ifdef CAVE_SIGNALTAP_BOOT_DIAGNOSTIC
+  wire [2:0]   caveHwDiagSource;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg          caveDiagnosticResetSystemSync0 = 1'b0;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg          caveDiagnosticResetSystemSync1 = 1'b0;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg          caveDiagnosticResetCpuSync0 = 1'b0;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg          caveDiagnosticResetCpuSync1 = 1'b0;
+`ifdef CAVE_SIGNALTAP_BOOT_HOLD
+  reg  [1:0]   caveBootHoldSync = 2'b11;
+`endif
+`else
+  wire [0:0]   caveHwDiagSource;
+`endif
+  wire [127:0] caveHwDiagProbe;
+`endif
+
+`ifdef CAVE_SIGNALTAP_BOOT_DIAGNOSTIC
+  wire effectiveCpuReset =
+    cpuReset | caveDiagnosticResetCpuSync1;
+  wire diagnosticBridgeReset =
+    reset | caveDiagnosticResetSystemSync1;
+  wire diagnosticTargetBridgeReset =
+    reset | caveDiagnosticResetCpuSync1;
+`else
+  wire effectiveCpuReset = cpuReset;
+  wire diagnosticBridgeReset = reset;
+  wire diagnosticTargetBridgeReset = reset;
+`endif
+
+  localparam [63:0] SS_CPU_OWNER_MASK =
+    64'h0000_007F_E2F9_FFFC;
+  localparam [63:0] SS_YMZ_SUPPORT_BITMAP =
+    64'h0000_0000_E379_FFFD;
+  localparam [63:0] SS_DONPACHI_SUPPORT_BITMAP =
+    64'h0000_0070_0379_FFFD;
+  localparam [63:0] SS_PWRINST2_SUPPORT_BITMAP =
+    64'h0000_007F_03F9_FFFD;
+  wire [63:0] ssSupportBitmap =
+    gameIndexReg == 4'd2 ? SS_DONPACHI_SUPPORT_BITMAP :
+    (gameIndexReg == 4'd7 || gameIndexReg == 4'd8) ?
+      SS_PWRINST2_SUPPORT_BITMAP :
+      SS_YMZ_SUPPORT_BITMAP;
+
+  cave_ss_ddr_if ssDdr();
+  cave_ssbus_if ssStreamBus();
+  cave_ssbus_if ssSystemOwners[3]();
+  cave_ssbus_if ssCpuBus();
+  cave_ssbus_if ssCpuOwners[2]();
+
+  wire         ssStreamBusy;
+  wire         ssStreamDone;
+  wire         ssStreamFormatError;
+  wire         ssControllerActive;
+  wire         ssFreeze;
+  wire         ssBlockClients;
+  wire         ssCpuHoldRequest;
+  wire         ssCpuCaptureRequest;
+  wire         ssStreamSaveStart;
+  wire         ssStreamLoadStart;
+  wire         ssMetadataRestoreStart;
+  wire         ssStreamAbort;
+  wire         ssRestoreWriteEnable;
+  wire         ssRestoreCommitRequest;
+  wire         ssReleasePulse;
+  wire         ssRecoveryReset;
+  wire         ssRestoreComplete;
+  wire         ssRestoreValid;
+  wire         ssCpuCaptureDoneSystem;
+  wire         ssCpuIdleSystem;
+  wire         ssCpuClientsIdleSystem;
+  wire         ssCpuCommitDoneSystem;
+  wire         ssCpuReconstructionReadySystem;
+  wire         ssCpuCaptureRequestCpu;
+  wire         ssCpuHoldCpu;
+  wire         ssRestoreStartCpu;
+  wire         ssRestoreCommitCpu;
+  wire         ssReleaseCpu;
+  wire         ssRecoveryResetCpu;
+  wire         ssRestoreEnableCpu;
+  wire         ssDdrGranted;
+  wire         ssRomIdentityValid;
+  wire [31:0]  ssRomSize;
+  wire [63:0]  ssRomSignature;
+  wire         ssNvramRd;
+  wire         ssNvramWr;
+  wire [6:0]   ssNvramAddr;
+  wire [15:0]  ssNvramDin;
+  wire         ssNvramBusy;
+  wire [31:0]  ssSetId = {24'h434156, 4'd0, gameIndexReg};
+  reg  [3:0]   ssVideoIdleCount;
+  wire         ssCanonicalizeSystem =
+    ssRestoreCommitRequest | ssRecoveryReset;
+  wire         ssVideoClientsIdleRaw =
+    _gpu_io_ss_idle &
+    _spriteFrameBuffer_io_ss_idle &
+    _systemFrameBuffer_io_ss_idle &
+    _layerTileRomCrossing0_io_ss_idle &
+    _layerTileRomCrossing1_io_ss_idle &
+    _layerTileRomCrossing2_io_ss_idle &
+    _pwrinst2LayerTileRomCrossing_io_ss_idle;
+  wire         ssVideoClientsIdle = &ssVideoIdleCount;
+  wire         ssGameplaySourcesIdle =
+    ssCpuIdleSystem & ssCpuClientsIdleSystem & ssVideoClientsIdle;
+  wire         ssCpuCaptureDoneCombined =
+    _main_io_ss_capture_done & _sound_io_ss_capture_done;
+  wire         ssCpuIdleCombined =
+    _main_io_ss_cpu_idle & _sound_io_ss_cpu_idle;
+  wire         ssReconstructionReadyCombined =
+    _main_io_ss_reconstruction_ready &
+    _sound_io_ss_reconstruction_ready;
+  reg          ssMainCommitSeen = 1'b0;
+  reg          ssSoundCommitSeen = 1'b0;
+  reg          ssCombinedCommitReported = 1'b0;
+  reg          ssCombinedCommitDone = 1'b0;
+
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg          cpuResetSystemSync0 = 1'b1;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg          cpuResetSystemSync1 = 1'b1;
 
   CaveGameConfig gameConfig (
     .game_index           (gameIndexReg),
@@ -471,27 +685,78 @@ module Cave(
   wire         ioctlRomIndexSelected = ioctl_index == 8'h0;
   wire         memSys_io_prog_rom_writeEnable = ioctl_download & ioctlRomIndexSelected;
   wire         ioctlNvramIndexSelected = ioctl_index == 8'h2;
-  wire         memSys_io_prog_nvram_readEnable =
-    ioctl_upload & ioctlNvramIndexSelected;
+  wire         ioctlNvramEepromAddress = ioctl_addr < 27'd128;
+  wire         ioctlNvramEepromReadEnable =
+    ioctl_upload & ioctlNvramIndexSelected & ioctlNvramEepromAddress;
+  wire         ioctlNvramEepromWriteEnable =
+    ioctl_download & ioctlNvramIndexSelected & ioctlNvramEepromAddress;
+  wire         ioctlNvramHighScoreReadEnable =
+    ioctl_upload & ioctlNvramIndexSelected & ~ioctlNvramEepromAddress;
   wire         memSys_io_prog_nvram_writeEnable =
-    ioctl_download & ioctlNvramIndexSelected;
+    ioctlNvramEepromWriteEnable;
+  wire [15:0]  ioctlNvramEepromDout;
+  wire         ioctlNvramEepromUploadWaitN;
+  wire         ioctlNvramEepromMemRd;
+  wire [6:0]   ioctlNvramEepromMemAddr;
+  wire         ioctlNvramAccess =
+    (ioctl_upload | ioctl_download) & ioctlNvramIndexSelected;
+  wire         ioctlNvramEepromWaitN = ioctl_upload
+    ? ioctlNvramEepromUploadWaitN
+    : _memSys_io_prog_nvram_wait_n;
+  wire         ioctlNvramWaitN = _main_io_hs_nvram_wait_n &
+    (~ioctlNvramEepromAddress | ioctlNvramEepromWaitN);
   wire         ioctlMemoryWaitN =
-    memSys_io_prog_nvram_readEnable | memSys_io_prog_nvram_writeEnable
-      ? _memSys_io_prog_nvram_wait_n
+    ioctlNvramAccess
+      ? ioctlNvramWaitN
       : ~memSys_io_prog_rom_writeEnable | _memSys_io_prog_rom_wait_n;
-  reg  [15:0]  memSys_io_prog_nvram_ioctl_din_r;
   reg          memSysIoctlDownloadReg;
   wire         ioctlVideoIndexSelected = ioctl_index == 8'h3;
   wire         videoSys_io_prog_video_writeEnable =
     ioctl_download & ioctlVideoIndexSelected;
   reg          videoSysIoctlDownloadReg;
-  wire         cpuDomainReset = cpuReset | ~_memSys_io_ready;
+  wire         ioctlHighScoreConfigSelected = ioctl_index == 8'h4;
+  reg          eepromDirtyReg;
+  reg          nvramUploadReg;
+  wire         ssControllerReset = reset | cpuResetSystemSync1;
+  wire         ssBusReset = ssControllerReset | ssRecoveryReset;
+  wire         cpuDomainResetBase;
+`ifdef CAVE_SIGNALTAP_BOOT_HOLD
+  wire         cpuDomainReset = cpuDomainResetBase | caveBootHoldSync[1];
+`else
+  wire         cpuDomainReset = cpuDomainResetBase;
+`endif
   wire         ioctlGameIndexWrite = ioctl_download & ioctl_wr & ioctl_index == 8'h1;
   wire         optionGameIndexFallback =
     ~ioctl_download & ioctlDownloadReg & ~gameIndexReg_latched;
   wire         effectiveRotate = options_rotate;
+  assign game_index = gameIndexReg;
   wire         videoVBlankFalling = ~videoVBlankPipe1 & videoVBlankPipe2;
   wire         spriteFrameBufferSwap = _main_io_spriteFrameBufferSwap;
+
+  CaveCpuResetBridge cpuResetBridge (
+    .clock            (cpuClock),
+    .cpu_reset        (effectiveCpuReset),
+    .mem_ready_async  (_memSys_io_ready),
+    .recovery_reset   (ssRecoveryResetCpu),
+    .cpu_domain_reset (cpuDomainResetBase)
+  );
+
+`ifdef CAVE_SIGNALTAP_BOOT_DIAGNOSTIC
+  always @(posedge clock) begin
+    caveDiagnosticResetSystemSync0 <= caveHwDiagSource[2];
+    caveDiagnosticResetSystemSync1 <= caveDiagnosticResetSystemSync0;
+  end
+
+  always @(posedge cpuClock) begin
+    caveDiagnosticResetCpuSync0 <= caveHwDiagSource[2];
+    caveDiagnosticResetCpuSync1 <= caveDiagnosticResetCpuSync0;
+  end
+`endif
+
+`ifdef CAVE_SIGNALTAP_BOOT_HOLD
+  always @(posedge cpuClock)
+    caveBootHoldSync <= {caveBootHoldSync[0], caveHwDiagSource[1]};
+`endif
 
   always @(posedge cpuClock) begin
     gameIndexCpuToggleSync0 <= gameIndexCpuLoadToggle;
@@ -502,7 +767,36 @@ module Cave(
     end
   end
 
+  always @(posedge cpuClock) begin
+    ssCombinedCommitDone <= 1'b0;
+
+    if (cpuDomainReset | ssRestoreStartCpu | ssReleaseCpu) begin
+      ssMainCommitSeen <= 1'b0;
+      ssSoundCommitSeen <= 1'b0;
+      ssCombinedCommitReported <= 1'b0;
+    end else begin
+      if (_main_io_ss_restore_commit_done)
+        ssMainCommitSeen <= 1'b1;
+      if (_sound_io_ss_restore_commit_done)
+        ssSoundCommitSeen <= 1'b1;
+
+      if (!ssCombinedCommitReported &&
+          (ssMainCommitSeen | _main_io_ss_restore_commit_done) &&
+          (ssSoundCommitSeen | _sound_io_ss_restore_commit_done)) begin
+        ssCombinedCommitDone <= 1'b1;
+        ssCombinedCommitReported <= 1'b1;
+      end
+    end
+  end
+
   always @(posedge clock) begin
+    if (ssControllerReset | ~ssBlockClients | ~ssVideoClientsIdleRaw)
+      ssVideoIdleCount <= 4'd0;
+    else if (~(&ssVideoIdleCount))
+      ssVideoIdleCount <= ssVideoIdleCount + 4'd1;
+
+    cpuResetSystemSync0 <= effectiveCpuReset;
+    cpuResetSystemSync1 <= cpuResetSystemSync0;
     videoVBlankPipe0 <= _videoSys_io_video_vBlank;
     videoVBlankPipe1 <= videoVBlankPipe0;
     videoVBlankPipe2 <= videoVBlankPipe1;
@@ -515,16 +809,39 @@ module Cave(
     else if (optionGameIndexFallback | ioctlGameIndexWrite)
       gameIndexCpuLoadToggle <= ~gameIndexCpuLoadToggle;
     ioctlDownloadReg <= ioctl_download;
-    if (_memSys_io_prog_nvram_valid)
-      memSys_io_prog_nvram_ioctl_din_r <= _memSys_io_prog_nvram_dout;
     memSysIoctlDownloadReg <= ioctl_download;
     videoSysIoctlDownloadReg <= ioctl_download;
+    if (reset) begin
+      nvramUploadReg <= 1'b0;
+      eepromDirtyReg <= 1'b0;
+    end else begin
+      nvramUploadReg <= ioctl_upload & ioctlNvramIndexSelected;
+      if ((ioctl_upload & ioctlNvramIndexSelected) & ~nvramUploadReg)
+        eepromDirtyReg <= 1'b0;
+      if (_memSys_io_eeprom_wr)
+        eepromDirtyReg <= 1'b1;
+    end
     if (reset)
       gameIndexReg_latched <= 1'b0;
     else
       gameIndexReg_latched <=
         optionGameIndexFallback | ioctlGameIndexWrite | gameIndexReg_latched;
   end // always @(posedge)
+
+  CaveNvramUploadPrefetch nvramUploadPrefetch (
+    .clock         (clock),
+    .reset         (reset),
+    .upload        (ioctlNvramEepromReadEnable),
+    .upload_addr   (ioctl_addr),
+    .upload_dout   (ioctlNvramEepromDout),
+    .upload_wait_n (ioctlNvramEepromUploadWaitN),
+    .mem_rd        (ioctlNvramEepromMemRd),
+    .mem_addr      (ioctlNvramEepromMemAddr),
+    .mem_dout      (_memSys_io_prog_nvram_dout),
+    .mem_wait_n    (_memSys_io_prog_nvram_wait_n),
+    .mem_valid     (_memSys_io_prog_nvram_valid)
+  );
+
   assign dipsRegsWr =
     ioctl_download & ioctl_index == 8'hFE & ioctl_addr[26:3] == 24'h0 & ioctl_wr;
   assign dipsRegsAddr = ioctl_addr[2:1];
@@ -533,11 +850,165 @@ module Cave(
     .io_mem_wr   (dipsRegsWr),
     .io_mem_addr (dipsRegsAddr),
     .io_mem_din  (ioctl_dout),
+    .io_ss_wr    (1'b0),
+    .io_ss_din   (16'd0),
     .io_regs_0   (_dipsRegs_io_regs_0)
   );
+
+  CaveSaveStateBusMux #(.COUNT(3)) saveStateSystemBusMux (
+    .clk     (clock),
+    .owners  (ssSystemOwners),
+    .stream  (ssStreamBus)
+  );
+
+  CaveSaveStateMetadata saveStateMetadata (
+    .clk                    (clock),
+    .reset                  (ssBusReset),
+    .restore_start          (ssMetadataRestoreStart),
+    .current_game_id        ({4'd0, gameIndexReg}),
+    .current_set_id         (ssSetId),
+    .current_rom_size       (ssRomSize),
+    .current_rom_signature  (ssRomSignature),
+    .current_support_bitmap (ssSupportBitmap),
+    .restore_complete       (ssRestoreComplete),
+    .restore_valid          (ssRestoreValid),
+    .restored_game_id       (),
+    .restored_rom_signature (),
+    .ssbus                  (ssSystemOwners[0])
+  );
+
+  CaveSaveStateNvram saveStateNvram (
+    .clk            (clock),
+    .reset          (ssBusReset),
+    .state_enable   (ssBlockClients &
+                     ssCpuIdleSystem &
+                     ssCpuClientsIdleSystem),
+    .restore_enable (ssRestoreWriteEnable),
+    .mem_rd         (ssNvramRd),
+    .mem_wr         (ssNvramWr),
+    .mem_addr       (ssNvramAddr),
+    .mem_din        (ssNvramDin),
+    .mem_dout       (_memSys_io_prog_nvram_dout),
+    .mem_wait_n     (_memSys_io_prog_nvram_wait_n),
+    .mem_valid      (_memSys_io_prog_nvram_valid),
+    .busy           (ssNvramBusy),
+    .blocked_access (),
+    .ssbus          (ssSystemOwners[2])
+  );
+
+  CaveSaveStateBusCdc #(
+    .SELECT_MASK(SS_CPU_OWNER_MASK)
+  ) saveStateCpuBusCdc (
+    .src_clk            (clock),
+    .src_reset          (ssBusReset),
+    .src_restore_enable (ssRestoreWriteEnable),
+    .src_select_mask    (ssSupportBitmap),
+    .src_bus            (ssSystemOwners[1]),
+    .dst_clk            (cpuClock),
+    .dst_reset          (cpuDomainReset),
+    .dst_restore_enable (ssRestoreEnableCpu),
+    .dst_bus            (ssCpuBus)
+  );
+
+  CaveSaveStateBusMux #(.COUNT(2)) saveStateCpuBusMux (
+    .clk     (cpuClock),
+    .owners  (ssCpuOwners),
+    .stream  (ssCpuBus)
+  );
+
+  CaveSaveStateCpuControlCdc saveStateCpuControlCdc (
+    .src_clk                       (clock),
+    .src_reset                     (ssControllerReset),
+    .src_capture_request           (ssCpuCaptureRequest),
+    .src_hold                      (ssCpuHoldRequest),
+    .src_restore_start             (ssMetadataRestoreStart),
+    .src_restore_commit            (ssRestoreCommitRequest),
+    .src_release                   (ssReleasePulse),
+    .src_recovery_reset            (ssRecoveryReset),
+    .src_capture_done              (ssCpuCaptureDoneSystem),
+    .src_cpu_idle                  (ssCpuIdleSystem),
+    .src_clients_idle              (ssCpuClientsIdleSystem),
+    .src_restore_commit_done       (ssCpuCommitDoneSystem),
+    .src_reconstruction_ready      (ssCpuReconstructionReadySystem),
+    .dst_clk                       (cpuClock),
+    .dst_reset                     (effectiveCpuReset),
+    .dst_capture_request           (ssCpuCaptureRequestCpu),
+    .dst_hold                      (ssCpuHoldCpu),
+    .dst_restore_start             (ssRestoreStartCpu),
+    .dst_restore_commit            (ssRestoreCommitCpu),
+    .dst_release                   (ssReleaseCpu),
+    .dst_recovery_reset            (ssRecoveryResetCpu),
+    .dst_capture_done              (ssCpuCaptureDoneCombined),
+    .dst_cpu_idle                  (ssCpuIdleCombined),
+    .dst_clients_idle              (_main_io_ss_clients_idle &
+                                    _sound_io_ss_idle),
+    .dst_restore_commit_done       (ssCombinedCommitDone),
+    .dst_reconstruction_ready      (ssReconstructionReadyCombined)
+  );
+
+  CaveSaveStateController saveStateController (
+    .clk                     (clock),
+    .reset                   (ssControllerReset),
+    .allow                   (ss_available),
+    .save_request            (ss_save_request),
+    .load_request            (ss_load_request),
+    .vblank                  (videoVBlankPipe2),
+    .cpu_capture_done        (ssCpuCaptureDoneSystem),
+    .clients_idle            (ssCpuIdleSystem &
+                              ssCpuClientsIdleSystem &
+                              ssVideoClientsIdle &
+                              _ddr_1_idle),
+    .stream_busy             (ssStreamBusy),
+    .stream_done             (ssStreamDone),
+    .stream_format_error     (ssStreamFormatError),
+    .restore_valid           (ssRestoreValid),
+    .restore_commit_done     (ssCpuCommitDoneSystem),
+    .reconstruction_ready    (ssCpuReconstructionReadySystem &
+                              _gpu_io_ss_reconstruction_ready),
+    .active                  (ssControllerActive),
+    .freeze                  (ssFreeze),
+    .block_clients           (ssBlockClients),
+    .cpu_hold                (ssCpuHoldRequest),
+    .cpu_capture_request     (ssCpuCaptureRequest),
+    .stream_save_start       (ssStreamSaveStart),
+    .stream_load_start       (ssStreamLoadStart),
+    .metadata_restore_start  (ssMetadataRestoreStart),
+    .stream_abort            (ssStreamAbort),
+    .restore_write_enable    (ssRestoreWriteEnable),
+    .restore_commit_request  (ssRestoreCommitRequest),
+    .release_pulse           (ssReleasePulse),
+    .recovery_reset          (ssRecoveryReset),
+    .state_debug             (ss_state_debug),
+    .last_error              (ss_last_error)
+  );
+
+  CaveSaveStateData #(
+    .DDR_BASE    (32'h3e00_0000),
+    .SLOT_LENGTH (32'h0040_0000),
+    .CHUNK_COUNT (48)
+  ) saveStateData (
+    .clk          (clock),
+    .reset        (ssBusReset),
+    .ddr          (ssDdr),
+    .load_start   (ssStreamLoadStart),
+    .save_start   (ssStreamSaveStart),
+    .abort        (ssStreamAbort),
+    .slot         (ss_slot),
+    .busy         (ssStreamBusy),
+    .done         (ssStreamDone),
+    .format_error (ssStreamFormatError),
+    .ssbus        (ssStreamBus)
+  );
+
+  assign ss_available = _memSys_io_ready & ssRomIdentityValid &
+                        ~ioctl_download & ~_main_io_hs_active;
+  assign ss_active = ssControllerActive;
+  assign ss_busy = ssStreamBusy;
+
   DDR ddr_1 (
     .clock              (clock),
     .reset              (reset),
+    .io_block_new_requests(ssBlockClients & ssGameplaySourcesIdle),
     .io_mem_rd          (_ddr_1_io_mem_rd),
     .io_mem_wr          (_ddr_1_io_mem_wr),
     .io_mem_addr        (_ddr_1_io_mem_addr),
@@ -548,15 +1019,42 @@ module Cave(
     .io_mem_valid       (_ddr_1_io_mem_valid),
     .io_mem_burstLength (_ddr_1_io_mem_burstLength),
     .io_mem_burstDone   (_ddr_1_io_mem_burstDone),
-    .io_ddr_rd          (ddr_rd),
-    .io_ddr_wr          (ddr_wr),
-    .io_ddr_addr        (ddr_addr),
-    .io_ddr_mask        (ddr_mask),
-    .io_ddr_din         (ddr_din),
-    .io_ddr_dout        (ddr_dout),
-    .io_ddr_wait_n      (ddr_wait_n),
-    .io_ddr_valid       (ddr_valid),
-    .io_ddr_burstLength (ddr_burstLength)
+    .io_ddr_rd          (_ddr_game_rd),
+    .io_ddr_wr          (_ddr_game_wr),
+    .io_ddr_addr        (_ddr_game_addr),
+    .io_ddr_mask        (_ddr_game_mask),
+    .io_ddr_din         (_ddr_game_din),
+    .io_ddr_dout        (_ddr_game_dout),
+    .io_ddr_wait_n      (_ddr_game_wait_n),
+    .io_ddr_valid       (_ddr_game_valid),
+    .io_ddr_burstLength (_ddr_game_burstLength),
+    .io_idle            (_ddr_1_idle)
+  );
+
+  CaveSaveStateDdrArbiter saveStateDdrArbiter (
+    .clk               (clock),
+    .reset             (reset),
+    .game_idle         (_ddr_1_idle),
+    .game_rd           (_ddr_game_rd),
+    .game_wr           (_ddr_game_wr),
+    .game_addr         (_ddr_game_addr),
+    .game_mask         (_ddr_game_mask),
+    .game_din          (_ddr_game_din),
+    .game_burst_length (_ddr_game_burstLength),
+    .game_dout         (_ddr_game_dout),
+    .game_wait_n       (_ddr_game_wait_n),
+    .game_valid        (_ddr_game_valid),
+    .save              (ssDdr),
+    .ddr_rd            (ddr_rd),
+    .ddr_wr            (ddr_wr),
+    .ddr_addr          (ddr_addr),
+    .ddr_mask          (ddr_mask),
+    .ddr_din           (ddr_din),
+    .ddr_burst_length  (ddr_burstLength),
+    .ddr_dout          (ddr_dout),
+    .ddr_wait_n        (ddr_wait_n),
+    .ddr_valid         (ddr_valid),
+    .save_granted      (ssDdrGranted)
   );
   SDRAM sdram_1 (
     .clock            (clock),
@@ -580,8 +1078,15 @@ module Cave(
     .io_sdram_dout    (sdram_dout)
   );
   assign _memSys_io_prog_rom_wr = memSys_io_prog_rom_writeEnable & ioctl_wr;
-  assign _memSys_io_prog_nvram_rd = memSys_io_prog_nvram_readEnable & ioctl_rd;
-  assign _memSys_io_prog_nvram_wr = memSys_io_prog_nvram_writeEnable & ioctl_wr;
+  assign _memSys_io_prog_nvram_rd =
+    ssNvramRd | ioctlNvramEepromMemRd;
+  assign _memSys_io_prog_nvram_wr =
+    ssNvramWr | (memSys_io_prog_nvram_writeEnable & ioctl_wr);
+  assign _memSys_io_prog_nvram_addr =
+    (ssNvramRd | ssNvramWr) ? {20'd0, ssNvramAddr} :
+    ioctlNvramEepromReadEnable ? {20'd0, ioctlNvramEepromMemAddr} :
+    ioctl_addr;
+  assign _memSys_io_prog_nvram_din = ssNvramWr ? ssNvramDin : ioctl_dout;
   assign _memSys_io_prog_done =
     ~ioctl_download & memSysIoctlDownloadReg & ioctlRomIndexSelected;
   MemSys memSys (
@@ -603,8 +1108,8 @@ module Cave(
     .io_prog_rom_wait_n               (_memSys_io_prog_rom_wait_n),
     .io_prog_nvram_rd                 (_memSys_io_prog_nvram_rd),
     .io_prog_nvram_wr                 (_memSys_io_prog_nvram_wr),
-    .io_prog_nvram_addr               (ioctl_addr),
-    .io_prog_nvram_din                (ioctl_dout),
+    .io_prog_nvram_addr               (_memSys_io_prog_nvram_addr),
+    .io_prog_nvram_din                (_memSys_io_prog_nvram_din),
     .io_prog_nvram_dout               (_memSys_io_prog_nvram_dout),
     .io_prog_nvram_wait_n             (_memSys_io_prog_nvram_wait_n),
     .io_prog_nvram_valid              (_memSys_io_prog_nvram_valid),
@@ -696,7 +1201,14 @@ module Cave(
     .io_systemFrameBuffer_mask        (_memSys_io_systemFrameBuffer_mask),
     .io_systemFrameBuffer_din         (_memSys_io_systemFrameBuffer_din),
     .io_systemFrameBuffer_wait_n      (_memSys_io_systemFrameBuffer_wait_n),
+    .io_romIdentity_valid             (ssRomIdentityValid),
+    .io_romIdentity_size              (ssRomSize),
+    .io_romIdentity_signature         (ssRomSignature),
     .io_ready                         (_memSys_io_ready)
+`ifdef CAVE_HW_DIAGNOSTICS
+    ,
+    .io_hw_debug                      (memSysHwDebug)
+`endif
   );
   assign _videoSys_io_prog_video_wr = videoSys_io_prog_video_writeEnable & ioctl_wr;
   assign _videoSys_io_prog_done =
@@ -733,6 +1245,9 @@ module Cave(
   Main main (
     .clock                                  (cpuClock),
     .reset                                  (cpuDomainReset),
+    .io_systemClock                         (clock),
+    .io_systemReset                         (reset),
+    .io_highScoreReset                      (effectiveCpuReset),
     .io_videoClock                          (videoClock),
     .io_spriteClock                         (clock),
     .io_gameIndex                           (gameIndexCpuReg),
@@ -872,7 +1387,38 @@ module Cave(
     .io_eeprom_dout                         (_main_io_eeprom_dout),
     .io_eeprom_wait_n                       (_main_io_eeprom_wait_n),
     .io_eeprom_valid                        (_main_io_eeprom_valid),
-    .io_spriteFrameBufferSwap               (_main_io_spriteFrameBufferSwap)
+    .io_hs_config_download                  (ioctl_download &
+                                             ioctlHighScoreConfigSelected),
+    .io_hs_config_wr                        (ioctl_wr),
+    .io_hs_config_addr                      (ioctl_addr),
+    .io_hs_config_dout                      (ioctl_dout),
+    .io_hs_nvram_download                   (ioctl_download &
+                                             ioctlNvramIndexSelected),
+    .io_hs_nvram_upload                     (ioctl_upload &
+                                             ioctlNvramIndexSelected),
+    .io_hs_nvram_rd                         (ioctl_rd),
+    .io_hs_nvram_wr                         (ioctl_wr),
+    .io_hs_nvram_addr                       (ioctl_addr),
+    .io_hs_nvram_dout                       (ioctl_dout),
+    .io_hs_nvram_din                        (_main_io_hs_nvram_din),
+    .io_hs_nvram_wait_n                     (_main_io_hs_nvram_wait_n),
+    .io_hs_dirty                            (_main_io_hs_dirty),
+    .io_hs_active                           (_main_io_hs_active),
+    .io_spriteFrameBufferSwap               (_main_io_spriteFrameBufferSwap),
+    .io_ss_hold                             (ssCpuHoldCpu),
+    .io_ss_capture_request                  (ssCpuCaptureRequestCpu),
+    .io_ss_restore_enable                   (ssRestoreEnableCpu),
+    .io_ss_restore_start                    (ssRestoreStartCpu),
+    .io_ss_restore_commit                   (ssRestoreCommitCpu),
+    .io_ss_release                          (ssReleaseCpu),
+    .io_ss_capture_done                     (_main_io_ss_capture_done),
+    .io_ss_cpu_idle                         (_main_io_ss_cpu_idle),
+    .io_ss_clients_idle                     (_main_io_ss_clients_idle),
+    .io_ss_restore_commit_done              (_main_io_ss_restore_commit_done),
+    .io_ss_reconstruction_ready             (_main_io_ss_reconstruction_ready),
+    .io_ss_blocked_access                   (_main_io_ss_blocked_access),
+    .io_service_debug                       (service_debug),
+    .io_ssbus                               (ssCpuOwners[0])
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
     ,
     .io_debug_pipeline                      (_main_io_debug_pipeline),
@@ -885,8 +1431,9 @@ module Cave(
   );
   CaveProgramRomReadFreezer main_io_progRom_freezer (
     .clock          (clock),
-    .reset          (reset),
+    .reset          (diagnosticBridgeReset),
     .io_targetClock (cpuClock),
+    .io_targetReset (diagnosticTargetBridgeReset),
     .io_in_rd       (_main_io_progRom_rd),
     .io_in_addr     (_main_io_progRom_addr),
     .io_in_dout     (_main_io_progRom_dout),
@@ -950,6 +1497,7 @@ module Cave(
     .io_options_pwrinst2_headroom (options_pwrinst2_headroom),
     .io_options_pwrinst2_psg_level (options_pwrinst2_psg_level),
     .io_options_pwrinst2_fm_level  (options_pwrinst2_fm_level),
+    .io_options_ymz_level           (options_ymz_level),
     .io_rom_0_rd                  (_sound_io_rom_0_rd),
     .io_rom_0_addr                (_sound_io_rom_0_addr),
     .io_rom_0_dout                (_sound_io_rom_0_dout),
@@ -966,12 +1514,32 @@ module Cave(
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
     .io_debug                     (_sound_io_debug),
 `endif
-    .io_audio                     (audio)
+`ifdef CAVE_PWRINST2_SOUND_DIAGNOSTICS
+    .io_hw_debug                  (_sound_io_hw_debug),
+`endif
+    .io_audio                     (audio),
+    .io_ss_hold                   (ssCpuHoldCpu),
+    .io_ss_capture_request        (ssCpuCaptureRequestCpu),
+    .io_ss_restore_enable         (ssRestoreEnableCpu),
+    .io_ss_restore_start          (ssRestoreStartCpu),
+    .io_ss_restore_commit         (ssRestoreCommitCpu),
+    .io_ss_release                (ssReleaseCpu),
+    .io_ss_capture_done           (_sound_io_ss_capture_done),
+    .io_ss_cpu_idle               (_sound_io_ss_cpu_idle),
+    .io_ss_restore_commit_done    (
+      _sound_io_ss_restore_commit_done
+    ),
+    .io_ss_reconstruction_ready   (
+      _sound_io_ss_reconstruction_ready
+    ),
+    .io_ss_idle                   (_sound_io_ss_idle),
+    .io_ssbus                     (ssCpuOwners[1])
   );
   CaveSoundRomReadFreezer sound_io_rom_0_freezer (
     .clock          (clock),
     .reset          (reset),
     .io_targetClock (cpuClock),
+    .io_hold_response(gameConfigCpu_sound_0_device == 2'h3),
     .io_in_rd       (_sound_io_rom_0_rd),
     .io_in_addr     (_sound_io_rom_0_addr),
     .io_in_dout     (_sound_io_rom_0_dout),
@@ -987,6 +1555,7 @@ module Cave(
     .clock          (clock),
     .reset          (reset),
     .io_targetClock (cpuClock),
+    .io_hold_response(gameConfigCpu_sound_0_device == 2'h3),
     .io_in_rd       (_sound_io_rom_1_rd),
     .io_in_addr     (_sound_io_rom_1_addr),
     .io_in_dout     (_sound_io_rom_1_dout),
@@ -1002,6 +1571,7 @@ module Cave(
     .clock          (clock),
     .reset          (reset),
     .io_targetClock (cpuClock),
+    .io_hold_response(gameConfigCpu_sound_0_device == 2'h3),
     .io_in_rd       (_sound_io_rom_2_rd),
     .io_in_addr     (_sound_io_rom_2_addr),
     .io_in_dout     (_sound_io_rom_2_dout),
@@ -1020,6 +1590,8 @@ module Cave(
     .clock                               (clock),
     .reset                               (reset),
     .io_videoClock                       (videoClock),
+    .io_ss_hold                          (ssBlockClients),
+    .io_ss_canonicalize                  (ssCanonicalizeSystem),
     .io_layerCtrl_0_enable               (options_layer_0),
     .io_layerCtrl_0_format               (gpu_io_layerCtrl_0_format),
     .io_layerCtrl_0_regs_tileSize        (_main_io_gpuMem_layer_0_regs_tileSize),
@@ -1144,7 +1716,9 @@ module Cave(
     .io_systemFrameBuffer_din            (_gpu_io_systemFrameBuffer_din),
     .io_paletteRam_addr                  (_main_io_gpuMem_paletteRam_addr),
     .io_paletteRam_dout                  (_main_io_gpuMem_paletteRam_dout),
-    .io_rgb                              (_gpu_rgb)
+    .io_rgb                              (_gpu_rgb),
+    .io_ss_idle                          (_gpu_io_ss_idle),
+    .io_ss_reconstruction_ready          (_gpu_io_ss_reconstruction_ready)
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
     ,
     .io_debug_video                      (_gpu_io_debug_video),
@@ -1190,7 +1764,9 @@ module Cave(
 `endif
   CaveTileRomClockCrossing gpu_io_layerCtrl_0_tileRom_crossing (
     .clock          (clock),
+    .reset          (reset),
     .io_targetClock (videoClock),
+    .io_block_new_requests (ssBlockClients),
     .io_in_rd       (_gpu_io_layerCtrl_0_tileRom_rd),
     .io_in_addr     (_gpu_io_layerCtrl_0_tileRom_addr),
     .io_in_dout     (_gpu_io_layerCtrl_0_tileRom_dout),
@@ -1198,11 +1774,14 @@ module Cave(
     .io_out_addr    (_memSys_io_layerTileRom_0_addr),
     .io_out_dout    (_memSys_io_layerTileRom_0_dout),
     .io_out_wait_n  (_memSys_io_layerTileRom_0_wait_n),
-    .io_out_valid   (_memSys_io_layerTileRom_0_valid)
+    .io_out_valid   (_memSys_io_layerTileRom_0_valid),
+    .io_idle        (_layerTileRomCrossing0_io_ss_idle)
   );
   CaveTileRomClockCrossing gpu_io_layerCtrl_1_tileRom_crossing (
     .clock          (clock),
+    .reset          (reset),
     .io_targetClock (videoClock),
+    .io_block_new_requests (ssBlockClients),
     .io_in_rd       (_gpu_io_layerCtrl_1_tileRom_rd),
     .io_in_addr     (_gpu_io_layerCtrl_1_tileRom_addr),
     .io_in_dout     (_gpu_io_layerCtrl_1_tileRom_dout),
@@ -1210,11 +1789,14 @@ module Cave(
     .io_out_addr    (_memSys_io_layerTileRom_1_addr),
     .io_out_dout    (_memSys_io_layerTileRom_1_dout),
     .io_out_wait_n  (_memSys_io_layerTileRom_1_wait_n),
-    .io_out_valid   (_memSys_io_layerTileRom_1_valid)
+    .io_out_valid   (_memSys_io_layerTileRom_1_valid),
+    .io_idle        (_layerTileRomCrossing1_io_ss_idle)
   );
   CaveTileRomClockCrossing gpu_io_layerCtrl_2_tileRom_crossing (
     .clock          (clock),
+    .reset          (reset),
     .io_targetClock (videoClock),
+    .io_block_new_requests (ssBlockClients),
     .io_in_rd       (_gpu_io_layerCtrl_2_tileRom_rd),
     .io_in_addr     (_gpu_io_layerCtrl_2_tileRom_addr),
     .io_in_dout     (_gpu_io_layerCtrl_2_tileRom_dout),
@@ -1222,11 +1804,14 @@ module Cave(
     .io_out_addr    (_memSys_io_layerTileRom_2_addr),
     .io_out_dout    (_memSys_io_layerTileRom_2_dout),
     .io_out_wait_n  (_memSys_io_layerTileRom_2_wait_n),
-    .io_out_valid   (_memSys_io_layerTileRom_2_valid)
+    .io_out_valid   (_memSys_io_layerTileRom_2_valid),
+    .io_idle        (_layerTileRomCrossing2_io_ss_idle)
   );
   CaveTileRomClockCrossing gpu_io_pwrinst2Layer2_tileRom_crossing (
     .clock          (clock),
+    .reset          (reset),
     .io_targetClock (videoClock),
+    .io_block_new_requests (ssBlockClients),
     .io_in_rd       (_gpu_io_pwrinst2Layer2_tileRom_rd),
     .io_in_addr     (_gpu_io_pwrinst2Layer2_tileRom_addr),
     .io_in_dout     (_gpu_io_pwrinst2Layer2_tileRom_dout),
@@ -1234,13 +1819,16 @@ module Cave(
     .io_out_addr    (_memSys_io_pwrinst2Layer2TileRom_addr),
     .io_out_dout    (_memSys_io_pwrinst2Layer2TileRom_dout),
     .io_out_wait_n  (_memSys_io_pwrinst2Layer2TileRom_wait_n),
-    .io_out_valid   (_memSys_io_pwrinst2Layer2TileRom_valid)
+    .io_out_valid   (_memSys_io_pwrinst2Layer2TileRom_valid),
+    .io_idle        (_pwrinst2LayerTileRomCrossing_io_ss_idle)
   );
   SpriteFrameBuffer spriteFrameBuffer (
     .clock                 (clock),
     .reset                 (reset),
     .io_videoClock         (videoClock),
     .io_enable             (_memSys_io_ready),
+    .io_ss_hold            (ssBlockClients),
+    .io_ss_canonicalize    (ssCanonicalizeSystem),
     .io_swap               (spriteFrameBufferSwap),
     .io_video_pos_y        (_videoSys_io_video_pos_y),
     .io_video_regs_size_x  (_videoSys_io_video_regs_size_x),
@@ -1261,7 +1849,8 @@ module Cave(
     .io_ddr_wait_n         (_memSys_io_spriteFrameBuffer_wait_n),
     .io_ddr_valid          (_memSys_io_spriteFrameBuffer_valid),
     .io_ddr_burstLength    (_memSys_io_spriteFrameBuffer_burstLength),
-    .io_ddr_burstDone      (_memSys_io_spriteFrameBuffer_burstDone)
+    .io_ddr_burstDone      (_memSys_io_spriteFrameBuffer_burstDone),
+    .io_ss_idle            (_spriteFrameBuffer_io_ss_idle)
   );
   assign systemFrameBufferForceBlank = ~_memSys_io_ready;
   SystemFrameBuffer systemFrameBuffer (
@@ -1269,6 +1858,8 @@ module Cave(
     .reset                         (reset),
     .io_videoClock                 (videoClock),
     .io_enable                     (_memSys_io_ready),
+    .io_ss_hold                    (ssBlockClients),
+    .io_ss_canonicalize            (ssCanonicalizeSystem),
     .io_rotate                     (effectiveRotate),
     .io_forceBlank                 (systemFrameBufferForceBlank),
     .io_video_vBlank               (_videoSys_io_video_vBlank),
@@ -1289,11 +1880,14 @@ module Cave(
     .io_ddr_addr                   (_memSys_io_systemFrameBuffer_addr),
     .io_ddr_mask                   (_memSys_io_systemFrameBuffer_mask),
     .io_ddr_din                    (_memSys_io_systemFrameBuffer_din),
-    .io_ddr_wait_n                 (_memSys_io_systemFrameBuffer_wait_n)
+    .io_ddr_wait_n                 (_memSys_io_systemFrameBuffer_wait_n),
+    .io_ss_idle                    (_systemFrameBuffer_io_ss_idle)
   );
   assign ioctl_wait_n = videoSys_io_prog_video_writeEnable | ioctlMemoryWaitN;
   assign ioctl_din =
-    memSys_io_prog_nvram_readEnable ? memSys_io_prog_nvram_ioctl_din_r : 16'h0;
+    ioctlNvramEepromReadEnable ? ioctlNvramEepromDout :
+    ioctlNvramHighScoreReadEnable ? _main_io_hs_nvram_din : 16'h0;
+  assign nvram_dirty = eepromDirtyReg | _main_io_hs_dirty;
   assign led_power = 1'b0;
   assign led_disk = ioctl_download;
   assign led_user = _memSys_io_ready;
@@ -1307,5 +1901,127 @@ module Cave(
   assign video_regs_size_x = _videoSys_io_video_regs_size_x;
   assign video_regs_size_y = _videoSys_io_video_regs_size_y;
   assign video_rotated = effectiveRotate;
+
+`ifdef CAVE_HW_DIAGNOSTICS
+  CaveHardwareDiagnostics hardwareDiagnostics (
+    .system_clock         (clock),
+    .cpu_clock            (cpuClock),
+    .video_clock          (videoClock),
+    .clear                (caveHwDiagSource[0]),
+    .system_reset         (diagnosticBridgeReset),
+    .cpu_reset            (cpuDomainReset),
+    .video_reset          (videoReset),
+    .game_index_system    (gameIndexReg),
+    .game_index_cpu       (gameIndexCpuReg),
+    .game_index_latched   (gameIndexReg_latched),
+    .ioctl_download       (ioctl_download),
+    .rom_identity_read    (memSysHwDebug[11]),
+    .mem_prog_done        (_memSys_io_prog_done),
+    .mem_startup_debug    (memSysHwDebug[7:0]),
+    .mem_ready            (_memSys_io_ready),
+    .rom_identity_valid   (ssRomIdentityValid),
+    .rom_size             (ssRomSize),
+    .mem_prog_rom_rd      (_memSys_io_progRom_rd),
+    .mem_prog_rom_wait_n  (_memSys_io_progRom_wait_n),
+    .mem_prog_rom_valid   (_memSys_io_progRom_valid),
+    .mem_cache_rom_rd     (memSysHwDebug[10]),
+    .mem_cache_rom_wait_n (memSysHwDebug[9]),
+    .mem_cache_rom_valid  (memSysHwDebug[8]),
+    .sdram_rd             (_sdram_1_io_mem_rd),
+    .sdram_wait_n         (_sdram_1_io_mem_wait_n),
+    .sdram_valid          (_sdram_1_io_mem_valid),
+    .sdram_dout           (_sdram_1_io_mem_dout),
+    .sdram_wr_event       (_sdram_1_io_mem_wr &
+                           _sdram_1_io_mem_wait_n),
+    .ddr_rd_event         (_ddr_game_rd & _ddr_game_wait_n),
+    .ddr_wr_event         (_ddr_game_wr & _ddr_game_wait_n),
+    .framebuffer_wr_event (_memSys_io_systemFrameBuffer_wr &
+                           _memSys_io_systemFrameBuffer_wait_n),
+    .cpu_prog_rom_rd      (_main_io_progRom_rd),
+    .cpu_prog_rom_valid   (_main_io_progRom_valid),
+    .cpu_frame_swap       (_main_io_spriteFrameBufferSwap),
+    .video_vblank         (_videoSys_io_video_vBlank),
+    .frame_force_blank    (frameBufferCtrl_forceBlank),
+    .ss_available         (ss_available),
+    .ss_active            (ss_active),
+    .ss_busy              (ss_busy),
+    .ss_save_request      (ss_save_request),
+    .ss_load_request      (ss_load_request),
+    .ss_block_clients     (ssBlockClients),
+    .ss_cpu_idle          (ssCpuIdleSystem),
+    .ss_cpu_clients_idle  (ssCpuClientsIdleSystem),
+    .ss_main_clients_idle_cpu(_main_io_ss_clients_idle),
+    .ss_sound_idle_cpu    (_sound_io_ss_idle),
+    .ss_video_clients_idle(ssVideoClientsIdle),
+    .ss_video_clients_idle_raw(ssVideoClientsIdleRaw),
+    .ss_gpu_idle          (_gpu_io_ss_idle),
+    .ss_sprite_framebuffer_idle(_spriteFrameBuffer_io_ss_idle),
+    .ss_system_framebuffer_idle(_systemFrameBuffer_io_ss_idle),
+    .ss_tile_0_idle       (_layerTileRomCrossing0_io_ss_idle),
+    .ss_tile_1_idle       (_layerTileRomCrossing1_io_ss_idle),
+    .ss_tile_2_idle       (_layerTileRomCrossing2_io_ss_idle),
+    .ss_pwrinst_tile_idle (_pwrinst2LayerTileRomCrossing_io_ss_idle),
+    .ss_ddr_idle          (_ddr_1_idle),
+    .ss_gameplay_sources_idle(ssGameplaySourcesIdle),
+    .ss_state             (ss_state_debug),
+    .ss_last_error        (ss_last_error),
+    .probe                (caveHwDiagProbe)
+  );
+
+  altsource_probe #(
+    .sld_auto_instance_index ("NO"),
+    .sld_instance_index      (0),
+    .instance_id             ("CHD"),
+    .probe_width             (128),
+`ifdef CAVE_SIGNALTAP_BOOT_DIAGNOSTIC
+    .source_width            (3),
+`ifdef CAVE_SIGNALTAP_BOOT_HOLD
+    .source_initial_value    ("2"),
+`else
+    .source_initial_value    ("0"),
+`endif
+`else
+    .source_width            (1),
+    .source_initial_value    ("0"),
+`endif
+    .enable_metastability    ("NO")
+  ) caveHardwareDiagnosticsProbe (
+    .probe  (caveHwDiagProbe),
+    .source (caveHwDiagSource)
+  );
+
+`ifdef CAVE_PWRINST2_SOUND_DIAGNOSTICS
+  wire [0:0] cavePwrInst2SoundDiagSource;
+
+  altsource_probe #(
+    .sld_auto_instance_index ("NO"),
+    .sld_instance_index      (1),
+    .instance_id             ("PSD"),
+    .probe_width             (256),
+    .source_width            (1),
+    .source_initial_value    ("0"),
+    .enable_metastability    ("NO")
+  ) cavePwrInst2SoundDiagnosticsProbe (
+    .probe  (_sound_io_hw_debug),
+    .source (cavePwrInst2SoundDiagSource)
+  );
+
+  wire [0:0] cavePwrInst2InputDiagSource;
+
+  altsource_probe #(
+    .sld_auto_instance_index ("NO"),
+    .sld_instance_index      (2),
+    .instance_id             ("PID"),
+    .probe_width             (64),
+    .source_width            (1),
+    .source_initial_value    ("0"),
+    .enable_metastability    ("NO")
+  ) cavePwrInst2InputDiagnosticsProbe (
+    .probe  (pwrinst2DiagInputProbe),
+    .source (cavePwrInst2InputDiagSource)
+  );
+`endif
+`endif
+
   assign sdram_cke = 1'b1;
 endmodule

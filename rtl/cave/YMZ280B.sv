@@ -17,7 +17,11 @@ module YMZ280B(
   input         io_rom_valid,
   output        io_audio_valid,
   output [15:0] io_audio_bits_left,
-  output        io_irq
+  output        io_irq,
+  input         io_ss_hold,
+  input         io_ss_restore_enable,
+  output        io_ss_idle,
+  cave_ssbus_if.slave io_ssbus
 );
   reg [7:0] addrReg;
   reg [7:0] dataReg;
@@ -25,6 +29,30 @@ module YMZ280B(
   reg [7:0] registerFile [0:127];
   reg [7:0] irqMaskReg;
   reg [7:0] controlReg;
+
+  cave_ssbus_if saveStateOwners[3]();
+
+  wire [1063:0] registerState;
+  wire          registerRestoreWr;
+  wire [31:0]   registerRestoreAddr;
+  wire [7:0]    registerRestoreData;
+  wire          channelControllerSsIdle;
+
+  genvar saveStateRegisterIndex;
+  generate
+    for (saveStateRegisterIndex = 0;
+         saveStateRegisterIndex < 128;
+         saveStateRegisterIndex = saveStateRegisterIndex + 1) begin : gen_save_state_register
+      assign registerState[(saveStateRegisterIndex * 8) +: 8] =
+        registerFile[saveStateRegisterIndex];
+    end
+  endgenerate
+
+  assign registerState[(128 * 8) +: 8] = addrReg;
+  assign registerState[(129 * 8) +: 8] = dataReg;
+  assign registerState[(130 * 8) +: 8] = statusReg;
+  assign registerState[(131 * 8) +: 8] = irqMaskReg;
+  assign registerState[(132 * 8) +: 8] = controlReg;
 
   wire        writeAddr = io_cpu_wr & ~io_cpu_addr;
   wire        writeData = io_cpu_wr & io_cpu_addr;
@@ -44,6 +72,21 @@ module YMZ280B(
 
       for (i = 0; i < 128; i = i + 1)
         registerFile[i] <= 8'h00;
+    end
+    else if (registerRestoreWr) begin
+      if (registerRestoreAddr < 32'd128)
+        registerFile[registerRestoreAddr[6:0]] <= registerRestoreData;
+      else begin
+        case (registerRestoreAddr)
+          32'd128: addrReg <= registerRestoreData;
+          32'd129: dataReg <= registerRestoreData;
+          32'd130: statusReg <= registerRestoreData;
+          32'd131: irqMaskReg <= registerRestoreData;
+          32'd132: controlReg <= registerRestoreData;
+          default: begin
+          end
+        endcase
+      end
     end
     else begin
       if (writeAddr)
@@ -67,6 +110,30 @@ module YMZ280B(
       end
     end
   end
+
+  CaveSaveStateBusMux #(.COUNT(3)) saveStateBusMux (
+    .clk    (clock),
+    .owners (saveStateOwners),
+    .stream (io_ssbus)
+  );
+
+  CaveSaveStateRegisterPort #(
+    .WIDTH        (8),
+    .COUNT        (133),
+    .SS_IDX       (8'd29),
+    .STREAM_WIDTH (2'd0)
+  ) registerSaveState (
+    .clk            (clock),
+    .reset          (reset),
+    .state_enable   (io_ss_hold & io_ss_idle),
+    .restore_enable (io_ss_restore_enable),
+    .capture_data   (registerState),
+    .restore_wr     (registerRestoreWr),
+    .restore_addr   (registerRestoreAddr),
+    .restore_data   (registerRestoreData),
+    .blocked_access (),
+    .ssbus          (saveStateOwners[0])
+  );
 
   ChannelController channelCtrl (
     .clock                   (clock),
@@ -161,9 +228,15 @@ module YMZ280B(
     .io_rom_addr             (io_rom_addr),
     .io_rom_dout             (io_rom_dout),
     .io_rom_wait_n           (io_rom_wait_n),
-    .io_rom_valid            (io_rom_valid)
+    .io_rom_valid            (io_rom_valid),
+    .io_ss_hold              (io_ss_hold),
+    .io_ss_restore_enable    (io_ss_restore_enable),
+    .io_ss_idle              (channelControllerSsIdle),
+    .io_ss_channel_bus       (saveStateOwners[1]),
+    .io_ss_scheduler_bus     (saveStateOwners[2])
   );
 
   assign io_cpu_dout = dataReg;
   assign io_irq = controlReg[4] & (|(statusReg & irqMaskReg));
+  assign io_ss_idle = channelControllerSsIdle;
 endmodule

@@ -61,38 +61,57 @@ module ColorMixer(
   wire spritePriority0 = spriteVisible & (effectiveSpritePriority == 2'h0);
   wire layer0Priority0 = layer0Visible & (io_layer0Pen_priority == 2'h0);
   wire layer1Priority0 = layer1Visible & (io_layer1Pen_priority == 2'h0);
+  wire pwrinst2Layer2Priority0 =
+    pwrinst2Layer2Visible & (io_pwrinst2Layer2Pen_priority == 2'h0);
   wire layer2Priority0 = layer2Visible & (io_layer2Pen_priority == 2'h0);
   wire spritePriority1 = spriteVisible & (effectiveSpritePriority == 2'h1);
   wire layer0Priority1 = layer0Visible & (io_layer0Pen_priority == 2'h1);
   wire layer1Priority1 = layer1Visible & (io_layer1Pen_priority == 2'h1);
+  wire pwrinst2Layer2Priority1 =
+    pwrinst2Layer2Visible & (io_pwrinst2Layer2Pen_priority == 2'h1);
   wire layer2Priority1 = layer2Visible & (io_layer2Pen_priority == 2'h1);
   wire spritePriority2 = spriteVisible & (effectiveSpritePriority == 2'h2);
   wire layer0Priority2 = layer0Visible & (io_layer0Pen_priority == 2'h2);
   wire layer1Priority2 = layer1Visible & (io_layer1Pen_priority == 2'h2);
+  wire pwrinst2Layer2Priority2 =
+    pwrinst2Layer2Visible & (io_pwrinst2Layer2Pen_priority == 2'h2);
   wire layer2Priority2 = layer2Visible & (io_layer2Pen_priority == 2'h2);
   wire spritePriority3 = spriteVisible & (&effectiveSpritePriority);
   wire layer0Priority3 = layer0Visible & (&io_layer0Pen_priority);
   wire layer1Priority3 = layer1Visible & (&io_layer1Pen_priority);
+  wire pwrinst2Layer2Priority3 =
+    pwrinst2Layer2Visible & (&io_pwrinst2Layer2Pen_priority);
   wire layer2Priority3 = layer2Visible & (&io_layer2Pen_priority);
 
-  wire [4:0] priority0Base =
-    pwrinst2Layer2Visible ? PEN_PWRINST2_LAYER2 : PEN_FILL;
+  wire [4:0] priority0Base = PEN_FILL;
   wire [4:0] priority0Sprite = spritePriority0 ? PEN_SPRITE : priority0Base;
   wire [4:0] priority0Layer0 = layer0Priority0 ? PEN_LAYER0 : priority0Sprite;
   wire [4:0] priority0Layer1 = layer1Priority0 ? PEN_LAYER1 : priority0Layer0;
-  wire [4:0] priority0Layer2 = layer2Priority0 ? PEN_LAYER2 : priority0Layer1;
+  wire [4:0] priority0PwrInst2Layer2 =
+    pwrinst2Layer2Priority0 ? PEN_PWRINST2_LAYER2 : priority0Layer1;
+  wire [4:0] priority0Layer2 =
+    layer2Priority0 ? PEN_LAYER2 : priority0PwrInst2Layer2;
   wire [4:0] priority1Sprite = spritePriority1 ? PEN_SPRITE : priority0Layer2;
   wire [4:0] priority1Layer0 = layer0Priority1 ? PEN_LAYER0 : priority1Sprite;
   wire [4:0] priority1Layer1 = layer1Priority1 ? PEN_LAYER1 : priority1Layer0;
-  wire [4:0] priority1Layer2 = layer2Priority1 ? PEN_LAYER2 : priority1Layer1;
+  wire [4:0] priority1PwrInst2Layer2 =
+    pwrinst2Layer2Priority1 ? PEN_PWRINST2_LAYER2 : priority1Layer1;
+  wire [4:0] priority1Layer2 =
+    layer2Priority1 ? PEN_LAYER2 : priority1PwrInst2Layer2;
   wire [4:0] priority2Sprite = spritePriority2 ? PEN_SPRITE : priority1Layer2;
   wire [4:0] priority2Layer0 = layer0Priority2 ? PEN_LAYER0 : priority2Sprite;
   wire [4:0] priority2Layer1 = layer1Priority2 ? PEN_LAYER1 : priority2Layer0;
-  wire [4:0] priority2Layer2 = layer2Priority2 ? PEN_LAYER2 : priority2Layer1;
+  wire [4:0] priority2PwrInst2Layer2 =
+    pwrinst2Layer2Priority2 ? PEN_PWRINST2_LAYER2 : priority2Layer1;
+  wire [4:0] priority2Layer2 =
+    layer2Priority2 ? PEN_LAYER2 : priority2PwrInst2Layer2;
   wire [4:0] priority3Sprite = spritePriority3 ? PEN_SPRITE : priority2Layer2;
   wire [4:0] priority3Layer0 = layer0Priority3 ? PEN_LAYER0 : priority3Sprite;
   wire [4:0] priority3Layer1 = layer1Priority3 ? PEN_LAYER1 : priority3Layer0;
-  wire [4:0] selectedPen = layer2Priority3 ? PEN_LAYER2 : priority3Layer1;
+  wire [4:0] priority3PwrInst2Layer2 =
+    pwrinst2Layer2Priority3 ? PEN_PWRINST2_LAYER2 : priority3Layer1;
+  wire [4:0] selectedPen =
+    layer2Priority3 ? PEN_LAYER2 : priority3PwrInst2Layer2;
   wire [4:0] finalSelectedPen = selectedPen;
 
   wire [14:0] fillAddr16 = io_gameConfig_pwrinst2 ? 15'h07F0 : 15'h03F0;

@@ -1,18 +1,18 @@
 <misterromdescription>
   <name>Puzzle Uo Poko (World)</name>
-  <mameversion>0226</mameversion>
+  <mameversion>0289</mameversion>
   <setname>uopoko</setname>
   <year>1998</year>
   <manufacturer>CAVE</manufacturer>
   <category>Puzzle</category>
-  <rbf>Cave</rbf>
+  <rbf>cave</rbf>
 
   <!-- ROM data -->
   <rom index="0" zip="uopoko.zip" md5="none" address="0x30000000">
     <!-- prog ROM -->
     <interleave output="16">
-      <part name="u26.int" crc="b445c9ac" map="01" />
-      <part name="u25.int" crc="a1258482" map="10" />
+      <part name="u26.u26" crc="b445c9ac" map="01" />
+      <part name="u25.u25" crc="a1258482" map="10" />
     </interleave>
 
     <!-- EEPROM -->
@@ -34,7 +34,10 @@
   </rom>
 
   <!-- NVRAM -->
-  <nvram index="2" size="128" />
+  <nvram index="2" size="270" />
 
-  <buttons names="-,-,-,-,Start,Coin,Pause" default="A,B,X,R,L,Start" />
+  <!-- high-score RAM: start, length, first/last initialization bytes -->
+  <rom index="4"><part>00 10 00 38 00 6E 00 20</part></rom>
+
+  <buttons names="-,-,-,-,Start,Coin,Pause,-,-,SS" default=",,,,R,L,Start" />
 </misterromdescription>

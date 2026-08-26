@@ -55,45 +55,76 @@ assign VIDEO_ARY = (!aspect_ratio) ? (orientation ? 12'd4 : 12'd3) : 12'd0;
 
 `include "build_id.v"
 localparam CONF_STR = {
-  "Cave;;",
-  "D0O12,Aspect ratio,Original,Fullscreen,[ARC1],[ARC2];",
-  "D0O4,Flip screen,Off,On;",
-  "D1O3,Rotate screen,Off,On;",
-  "-;",
-`ifndef CAVE_ENABLE_DEBUG_OVERLAY
-  "OOR,CRT H adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
-  "OSV,CRT V adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
-`endif
-  "O57,Scandoubler,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
-  "O8,Refresh rate,57Hz,60Hz;",
-  "-;",
-  "T9,Service mode;",
-  "DIP;",
-`ifdef CAVE_ENABLE_DEBUG_OVERLAY
-  "P1,Debug;",
-  "P1OA,Sprites,On,Off;",
-  "P1OB,Layer 0,On,Off;",
-  "P1OC,Layer 1,On,Off;",
-  "P1OD,Layer 2,On,Off;",
-  "P1OE,Debug Video,Off,On;",
-  "P1OFH,Debug View,Pipeline,CPU Addr,Writes,Video,Palette,PostPC,RawSprite,Sound;",
-  "P1OM,YM PSG,On,Off;",
-  "P1ON,YM FM,On,Off;",
-  "P1OO,OKI0,On,Off;",
-  "P1OP,OKI1,On,Off;",
-  "P1O[28:26],PI2 OKI0 Trim,100%,75%,50%,125%,150%,200%,250%,300%;",
-  "P1O[31:29],PI2 OKI1 Trim,100%,75%,50%,125%,150%,200%,250%,300%;",
-  "P1O[32],PI2 Headroom,On,Off;",
-  "P1O[35:33],PI2 PSG Trim,100%,75%,50%,125%,150%,200%,250%,300%;",
-  "P1O[38:36],PI2 FM Trim,100%,75%,50%,125%,150%,200%,250%,300%;",
+  "Cave;SS3E000000:400000;",
+  "P1,Video Options;",
+  "D0P1O12,Aspect Ratio,Original,Fullscreen,[ARC1],[ARC2];",
+  "D0P1O4,Flip Screen,Off,On;",
+  "h1P1O3,Rotate Screen,On,Off;",
+  "H1P1O3,Rotate Screen,Off,On;",
+  "P1O8,Refresh Rate,57Hz,60Hz;",
   "P1-;",
-`else
-  "P1,Hardware;",
+`ifndef CAVE_ENABLE_DEBUG_OVERLAY
+  "P1OOR,CRT H Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
+  "P1OSV,CRT V Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 `endif
-  "P1OIL,PCB,Dangun Feveron,DoDonPachi,DonPachi,ESP Ra.De.,Puzzle Uo Poko,Guwange,Gaia,Power Instinct 2,Gogetsuji Legends;",
+  "P1O[46],H-Scaler (Analog Out),Off,On;",
+  "P1O[51:47],H-Scale,100%,101.25%,102.5%,103.75%,105%,106.25%,107.5%,108.75%,110%,111.25%,112.5%,113.75%,115%,116.25%,117.5%,118.75%,80%,81.25%,82.5%,83.75%,85%,86.25%,87.5%,88.75%,90%,91.25%,92.5%,93.75%,95%,96.25%,97.5%,98.75%;",
+  "P1-;",
+  "P1O57,Scandoubler,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+  "P1-;",
+  "-;",
+  "P2,Audio Options;",
+  "h4P2O[55:52],YM2203 PSG Boost,0%,10%,20%,30%,40%,50%,60%,70%,80%,90%,100%;",
+  "h4P2O[59:56],YM2203 FM Boost,0%,10%,20%,30%,40%,50%,60%,70%,80%,90%,100%;",
+  "h3P2O[63:60],OKI0 Boost,0%,10%,20%,30%,40%,50%,60%,70%,80%,90%,100%;",
+  "h3P2O[67:64],OKI1 Boost,0%,10%,20%,30%,40%,50%,60%,70%,80%,90%,100%;",
+  "h2P2O[71:68],YMZ280B Boost,0%,10%,20%,30%,40%,50%,60%,70%,80%,90%,100%;",
+  "P2-;",
+  "-;",
+`ifdef CAVE_ENABLE_DEBUG_OVERLAY
+  "P3,Debug;",
+  "P3OA,Sprites,On,Off;",
+  "P3OB,Layer 0,On,Off;",
+  "P3OC,Layer 1,On,Off;",
+  "P3OD,Layer 2,On,Off;",
+  "P3OE,Debug Video,Off,On;",
+  "P3OFH,Debug View,Pipeline,CPU Addr,Writes,Video,Palette,PostPC,RawSprite,Sound;",
+  "P3OM,YM PSG,On,Off;",
+  "P3ON,YM FM,On,Off;",
+  "P3OO,OKI0,On,Off;",
+  "P3OP,OKI1,On,Off;",
+  "P3OIL,PCB,Dangun Feveron,DoDonPachi,DonPachi,ESP Ra.De.,Puzzle Uo Poko,Guwange,Gaia,Power Instinct 2,Gogetsuji Legends;",
+  "P3-;",
+  "-;",
+`endif
+  "O[42:41],Savestate Slot,1,2,3,4;",
+  "O[43],Autoincrement Slot,Off,On;",
+  "R[44],Save state (Alt-F1);",
+  "R[45],Restore state (F1);",
+  "-;",
+  "O[72],Autosave NVRAM,Off,On;",
+  "T[73],Save NVRAM;",
+  "-;",
+  "DIP;",
+  "T9,Service Mode;",
   "-;",
   "R0,Reset;",
-  "J,B0,B1,B2,B3,Start,Coin,Pause;",
+  "J,B0,B1,B2,B3,Start,Coin,Pause,-,-,SS;",
+  "I,",
+  "Load=DPAD Up|Save=Down|Slot=L+R,",
+  "Active Slot 1,",
+  "Active Slot 2,",
+  "Active Slot 3,",
+  "Active Slot 4,",
+  "Save to state 1,",
+  "Restore state 1,",
+  "Save to state 2,",
+  "Restore state 2,",
+  "Save to state 3,",
+  "Restore state 3,",
+  "Save to state 4,",
+  "Restore state 4;",
+  "v,2;",
   "V,v",`BUILD_DATE," by nullobject;"
 };
 
@@ -202,6 +233,7 @@ wire        direct_video;
 wire [15:0] sdram_sz;
 
 wire        ioctl_upload;
+reg         ioctl_upload_req = 1'b0;
 wire        ioctl_download;
 wire        ioctl_rd;
 wire        ioctl_wr;
@@ -210,9 +242,47 @@ wire  [7:0] ioctl_index;
 wire [26:0] ioctl_addr;
 wire [15:0] ioctl_din;
 wire [15:0] ioctl_dout;
+wire        nvram_dirty;
 
 wire [10:0] ps2_key;
 wire [31:0] joystick_0, joystick_1;
+
+wire        ss_save_request;
+wire        ss_load_request;
+wire        ss_available;
+wire        ss_active;
+wire        ss_busy;
+wire [3:0]  ss_state_debug;
+wire [3:0]  ss_last_error;
+wire        ss_info_request;
+wire [7:0]  ss_info;
+wire        ss_status_update;
+wire [1:0]  ss_slot;
+wire [31:0] cave_service_debug;
+wire [31:0] ss_joystick = joystick_0 | joystick_1;
+wire [127:0] status_in = {status[127:43], ss_slot, status[40:0]};
+wire [3:0] cave_game_index;
+wire cave_game_is_vertical =
+  cave_game_index == 4'd0 ||
+  cave_game_index == 4'd1 ||
+  cave_game_index == 4'd2 ||
+  cave_game_index == 4'd3 ||
+  cave_game_index == 4'd5;
+wire cave_audio_is_ymz =
+  cave_game_index == 4'd0 ||
+  cave_game_index == 4'd1 ||
+  cave_game_index == 4'd3 ||
+  cave_game_index == 4'd4 ||
+  cave_game_index == 4'd5 ||
+  cave_game_index == 4'd6;
+wire cave_audio_has_oki =
+  cave_game_index == 4'd2 ||
+  cave_game_index == 4'd7 ||
+  cave_game_index == 4'd8;
+wire cave_audio_has_ym2203 =
+  cave_game_index == 4'd7 ||
+  cave_game_index == 4'd8;
+wire rotate_screen = cave_game_is_vertical ? ~status[3] : status[3];
 
 hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io (
   .clk_sys(clk_sys),
@@ -220,7 +290,10 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io (
 
   .buttons(buttons),
   .status(status),
-  .status_menumask({15'd0, direct_video}),
+  .status_in(status_in),
+  .status_set(ss_status_update),
+  .status_menumask({11'd0, cave_audio_has_ym2203, cave_audio_has_oki,
+                   cave_audio_is_ymz, cave_game_is_vertical, direct_video}),
   .forced_scandoubler(forced_scandoubler),
   .new_vmode(new_vmode),
   .gamma_bus(gamma_bus),
@@ -228,6 +301,8 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io (
   .sdram_sz(sdram_sz),
 
   .ioctl_upload(ioctl_upload),
+  .ioctl_upload_req(ioctl_upload_req),
+  .ioctl_upload_index(8'h02),
   .ioctl_download(ioctl_download),
   .ioctl_rd(ioctl_rd),
   .ioctl_wr(ioctl_wr),
@@ -240,8 +315,107 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io (
   .joystick_0(joystick_0),
   .joystick_1(joystick_1),
 
-  .ps2_key(ps2_key)
+  .ps2_key(ps2_key),
+
+  .info_req(ss_info_request),
+  .info(ss_info)
 );
+
+reg osd_status_d = 1'b0;
+reg nvram_save_d = 1'b0;
+always @(posedge clk_sys) begin
+  osd_status_d <= OSD_STATUS;
+  nvram_save_d <= status[73];
+  ioctl_upload_req <=
+    (status[72] && nvram_dirty && OSD_STATUS && !osd_status_d) ||
+    (status[73] && !nvram_save_d);
+end
+
+CaveSaveStateUi saveStateUi (
+  .clk            (clk_sys),
+  .ps2_key        (ps2_key),
+  .allow_ss       (ss_available & ~ss_active & ~rst_sys),
+  .joy_ss         (ss_joystick[13]),
+  .joy_right      (ss_joystick[0]),
+  .joy_left       (ss_joystick[1]),
+  .joy_down       (ss_joystick[2]),
+  .joy_up         (ss_joystick[3]),
+  .status_slot    (status[42:41]),
+  .autoinc_slot   (status[43]),
+  .osd_saveload   (status[45:44]),
+  .save_request   (ss_save_request),
+  .load_request   (ss_load_request),
+  .info_request   (ss_info_request),
+  .info           (ss_info),
+  .status_update  (ss_status_update),
+  .selected_slot  (ss_slot)
+);
+
+`ifdef CAVE_ESPRADE_SERVICE_DIAGNOSTICS
+reg        esprade_service_status_prev = 1'b0;
+reg        esprade_service_update_prev = 1'b0;
+reg [7:0]  esprade_service_status_rises = 8'd0;
+reg [7:0]  esprade_service_update_rises = 8'd0;
+reg [15:0] esprade_service_update_status = 16'd0;
+
+always @(posedge clk_sys) begin
+  if (rst_sys) begin
+    esprade_service_status_prev <= 1'b0;
+    esprade_service_update_prev <= 1'b0;
+    esprade_service_status_rises <= 8'd0;
+    esprade_service_update_rises <= 8'd0;
+    esprade_service_update_status <= 16'd0;
+  end
+  else begin
+    esprade_service_status_prev <= status[9];
+    esprade_service_update_prev <= ss_status_update;
+
+    if (status[9] && !esprade_service_status_prev)
+      esprade_service_status_rises <= esprade_service_status_rises + 8'd1;
+
+    if (ss_status_update && !esprade_service_update_prev) begin
+      esprade_service_update_rises <= esprade_service_update_rises + 8'd1;
+      esprade_service_update_status <= status[15:0];
+    end
+  end
+end
+
+wire [127:0] esprade_service_probe = {
+  16'hE59D,
+  4'd1,
+  status[21:18],
+  {
+    rst_sys,
+    ioctl_download,
+    ss_available,
+    ss_active,
+    ss_status_update,
+    status[9],
+    status_in[9],
+    ss_busy
+  },
+  status[15:0],
+  status_in[15:0],
+  esprade_service_update_status,
+  cave_service_debug,
+  esprade_service_update_rises,
+  esprade_service_status_rises
+};
+wire [0:0] esprade_service_source;
+
+altsource_probe #(
+  .sld_auto_instance_index ("NO"),
+  .sld_instance_index      (3),
+  .instance_id             ("ESD"),
+  .probe_width             (128),
+  .source_width            (1),
+  .source_initial_value    ("0"),
+  .enable_metastability    ("NO")
+) espradeServiceDiagnosticsProbe (
+  .probe  (esprade_service_probe),
+  .source (esprade_service_source)
+);
+`endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // VIDEO
@@ -267,11 +441,6 @@ wire option_ym_psg = ~status[22];
 wire option_ym_fm = ~status[23];
 wire option_oki_0 = ~status[24];
 wire option_oki_1 = ~status[25];
-wire [2:0] option_pwrinst2_oki0_level = status[28:26];
-wire [2:0] option_pwrinst2_oki1_level = status[31:29];
-wire option_pwrinst2_headroom = ~status[32];
-wire [2:0] option_pwrinst2_psg_level = status[35:33];
-wire [2:0] option_pwrinst2_fm_level = status[38:36];
 wire [3:0] option_offset_x = 4'h0;
 wire [3:0] option_offset_y = 4'h0;
 `else
@@ -285,31 +454,94 @@ wire option_ym_psg = 1'b1;
 wire option_ym_fm = 1'b1;
 wire option_oki_0 = 1'b1;
 wire option_oki_1 = 1'b1;
-wire [2:0] option_pwrinst2_oki0_level = 3'd0;
-wire [2:0] option_pwrinst2_oki1_level = 3'd0;
-wire option_pwrinst2_headroom = 1'b1;
-wire [2:0] option_pwrinst2_psg_level = 3'd0;
-wire [2:0] option_pwrinst2_fm_level = 3'd0;
 wire [3:0] option_offset_x = status[27:24];
 wire [3:0] option_offset_y = status[31:28];
 `endif
+wire [3:0] option_pwrinst2_psg_level = status[55:52];
+wire [3:0] option_pwrinst2_fm_level = status[59:56];
+wire [3:0] option_pwrinst2_oki0_level = status[63:60];
+wire [3:0] option_pwrinst2_oki1_level = status[67:64];
+wire [3:0] option_ymz_level = status[71:68];
+wire option_pwrinst2_headroom = 1'b1;
 wire [2:0] sl = fx ? fx - 1'd1 : 3'd0;
-wire scandoubler = fx || forced_scandoubler;
+wire hscale_enable = status[46];
+wire signed [4:0] hscale = status[51:47];
+wire hscale_en_lat;
+wire [7:0] hscale_r, hscale_g, hscale_b;
+wire hscale_hs, hscale_hb, hscale_vs, hscale_vb;
+wire mixer_ce_pixel, mixer_de;
+wire [7:0] mixer_r, mixer_g, mixer_b;
+wire mixer_hs, mixer_vs;
+wire scandoubler, mixer_hq2x;
 
 assign VGA_F1 = 0;
 assign VGA_SL = sl[1:0];
 assign VGA_SCALER = 0;
-assign HDMI_FREEZE = 0;
+assign HDMI_FREEZE = ss_active;
 assign HDMI_BLACKOUT = 0;
 assign HDMI_BOB_DEINT = 0;
 
+CaveVideoHScale videoHScale (
+  .clk       (clk_video),
+  .enable    (hscale_enable),
+  .scale     (hscale),
+  // Cave's CRT H adjustment is already present in the incoming
+  // blank-to-sync geometry measured by the scaler.
+  .offset    (5'sd0),
+  .en_lat    (hscale_en_lat),
+  .ce_pix_in (ce_pix),
+  .r_in      (rgb[23:16]),
+  .g_in      (rgb[15:8]),
+  .b_in      (rgb[7:0]),
+  .hs_in     (hsync),
+  .hb_in     (hblank),
+  .vb_in     (vblank),
+  .vs_in     (vsync),
+  .r_out     (hscale_r),
+  .g_out     (hscale_g),
+  .b_out     (hscale_b),
+  .hs_out    (hscale_hs),
+  .hb_out    (hscale_hb),
+  .vs_out    (hscale_vs),
+  .vb_out    (hscale_vb)
+);
+
+CaveVideoHScaleMux videoHScaleMux (
+  .hscale_en_lat      (hscale_en_lat),
+  .scandoubler_fx     (fx),
+  .forced_scandoubler (forced_scandoubler),
+  .mixer_ce_pixel     (mixer_ce_pixel),
+  .mixer_r            (mixer_r),
+  .mixer_g            (mixer_g),
+  .mixer_b            (mixer_b),
+  .mixer_hs           (mixer_hs),
+  .mixer_vs           (mixer_vs),
+  .mixer_de           (mixer_de),
+  .hscale_r           (hscale_r),
+  .hscale_g           (hscale_g),
+  .hscale_b           (hscale_b),
+  .hscale_hs          (hscale_hs),
+  .hscale_vs          (hscale_vs),
+  .hscale_hb          (hscale_hb),
+  .hscale_vb          (hscale_vb),
+  .mixer_scandoubler  (scandoubler),
+  .mixer_hq2x         (mixer_hq2x),
+  .ce_pixel           (CE_PIXEL),
+  .video_r            (VGA_R),
+  .video_g            (VGA_G),
+  .video_b            (VGA_B),
+  .video_hs           (VGA_HS),
+  .video_vs           (VGA_VS),
+  .video_de           (VGA_DE)
+);
+
 video_mixer #(.LINE_LENGTH(388), .HALF_DEPTH(0), .GAMMA(1)) video_mixer (
   .CLK_VIDEO(clk_video),
-  .CE_PIXEL(CE_PIXEL),
+  .CE_PIXEL(mixer_ce_pixel),
   .ce_pix(ce_pix),
 
   .scandoubler(scandoubler),
-  .hq2x(fx==1),
+  .hq2x(mixer_hq2x),
   .gamma_bus(gamma_bus),
 
   .R(rgb[23:16]),
@@ -321,12 +553,12 @@ video_mixer #(.LINE_LENGTH(388), .HALF_DEPTH(0), .GAMMA(1)) video_mixer (
   .HBlank(hblank),
   .VBlank(vblank),
 
-  .VGA_R(VGA_R),
-  .VGA_G(VGA_G),
-  .VGA_B(VGA_B),
-  .VGA_VS(VGA_VS),
-  .VGA_HS(VGA_HS),
-  .VGA_DE(VGA_DE)
+  .VGA_R(mixer_r),
+  .VGA_G(mixer_g),
+  .VGA_B(mixer_b),
+  .VGA_VS(mixer_vs),
+  .VGA_HS(mixer_hs),
+  .VGA_DE(mixer_de)
 );
 
 // Update HPS when the core reloads or changes video timing.
@@ -447,7 +679,7 @@ Cave cave (
   // Options
   .options_offset_x(option_offset_x),
   .options_offset_y(option_offset_y),
-  .options_rotate(status[3]),
+  .options_rotate(rotate_screen),
   .options_compatibility(status[8]),
   .options_service(status[9]),
   .options_layer_0(option_layer_0),
@@ -467,6 +699,7 @@ Cave cave (
   .options_pwrinst2_headroom(option_pwrinst2_headroom),
   .options_pwrinst2_psg_level(option_pwrinst2_psg_level),
   .options_pwrinst2_fm_level(option_pwrinst2_fm_level),
+  .options_ymz_level(option_ymz_level),
   // Joystick signals
   .player_0_up(player_1_up),
   .player_0_down(player_1_down),
@@ -484,6 +717,17 @@ Cave cave (
   .player_1_start(player_2_start),
   .player_1_coin(player_2_coin),
   .player_1_pause(player_2_pause),
+  // Save states
+  .ss_save_request(ss_save_request),
+  .ss_load_request(ss_load_request),
+  .ss_slot(ss_slot),
+  .ss_available(ss_available),
+  .ss_active(ss_active),
+  .ss_busy(ss_busy),
+  .ss_state_debug(ss_state_debug),
+  .ss_last_error(ss_last_error),
+  .service_debug(cave_service_debug),
+  .game_index(cave_game_index),
   // Video signals
   .video_clockEnable(ce_pix),
   .video_changeMode(core_video_change_mode),
@@ -512,6 +756,7 @@ Cave cave (
   .ddr_wait_n(~DDRAM_BUSY),
   .ddr_valid(DDRAM_DOUT_READY),
   .ddr_burstLength(DDRAM_BURSTCNT),
+  .ddr_burstDone(1'b0),
   // SDRAM
   .sdram_cke(SDRAM_CKE),
   .sdram_cs_n(SDRAM_nCS),
@@ -533,6 +778,7 @@ Cave cave (
   .ioctl_addr(ioctl_addr),
   .ioctl_din(ioctl_din),
   .ioctl_dout(ioctl_dout),
+  .nvram_dirty(nvram_dirty),
   // RGB output
   .rgb(rgb),
   // Audio output

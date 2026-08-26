@@ -173,6 +173,7 @@ module CaveOKIM6295Core #(
   wire        cen_sr32;
   wire [3:0]  busy;
   wire [3:0]  ack;
+  wire [3:0]  ctrl_start;
   wire [3:0]  start;
   wire [3:0]  serial_start;
   wire [3:0]  direct_start;
@@ -205,6 +206,9 @@ module CaveOKIM6295Core #(
   reg         ctrl_debug_capture_done_d;
   wire        ctrl_debug_done_rise = ctrl_debug_capture_done & ~ctrl_debug_capture_done_d;
   wire [47:0] rom_debug_table_bytes;
+  reg  [3:0]  start_seen;
+  reg  [3:0]  start_busy_latched;
+  reg         ctrl_start_final_byte_seen;
 
   localparam [21:0] DUP_BUSY_WINDOW_RELOAD = 22'h3fffff;
 
@@ -287,7 +291,13 @@ module CaveOKIM6295Core #(
   wire [3:0]  handled_busy_start = ignored_busy_start | restart_new;
   wire [3:0]  accepted_direct_start = ack & direct_start;
 
-  assign busy_start = start & busy;
+  wire [3:0] new_start_request = start & ~start_seen;
+  assign start = align_ctrl_ok
+    ? (ctrl_start & {4{ctrl_start_final_byte_seen}})
+    : ctrl_start;
+  assign busy_start =
+    (new_start_request & busy) |
+    (start & start_seen & start_busy_latched);
   assign direct_start = start & ~handled_busy_start;
   assign serial_start = direct_start | restart_start;
   assign serial_stop = stop | restart_stop;
@@ -297,6 +307,32 @@ module CaveOKIM6295Core #(
   assign ctrl_ack = ack | handled_busy_start;
   assign dout = {4'hf, busy | (status_includes_start ? serial_start : 4'd0)};
   assign debug_busy_state = {restart_pending, restart_start};
+
+  // JT6295 raises start one table byte before its stop address is complete.
+  // Release it only after the final Cave ROM acknowledgement has arrived.
+  always @(posedge clk) begin
+    if (rst || !(|ctrl_start))
+      ctrl_start_final_byte_seen <= 1'b0;
+    else if (ctrl_ok)
+      ctrl_start_final_byte_seen <= 1'b1;
+  end
+
+  // Classify a request against the pre-existing voice state once. The serial
+  // engine can assert busy before it acknowledges a free start; re-evaluating
+  // busy throughout that handshake would make an ignore policy eat its own
+  // newly accepted request.
+  always @(posedge clk) begin
+    if (rst) begin
+      start_seen <= 4'd0;
+      start_busy_latched <= 4'd0;
+    end
+    else begin
+      start_seen <= (start_seen | start) & start;
+      start_busy_latched <=
+        (start_busy_latched & start_seen & start) |
+        (busy & new_start_request);
+    end
+  end
 
   always @(posedge clk) begin
     if (rst) begin
@@ -474,7 +510,7 @@ module CaveOKIM6295Core #(
     .debug_table_bytes (ctrl_debug_table_bytes),
     .debug_decode_bytes (ctrl_debug_decode_bytes),
     .debug_capture_done (ctrl_debug_capture_done),
-    .start      (start),
+    .start      (ctrl_start),
     .stop       (stop),
     .busy       (busy),
     .ack        (ctrl_ack),

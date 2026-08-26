@@ -86,6 +86,7 @@ module CaveFramebufferLineReadDma(
   input         clock,
   input         reset,
   input         io_start,
+  output        io_busy,
   output        io_in_rd,
   output [31:0] io_in_addr,
   input  [63:0] io_in_dout,
@@ -156,6 +157,7 @@ module CaveFramebufferLineReadDma(
   assign io_in_addr = {22'h0, burst_counter, 7'h0};
   assign io_out_wr = write;
   assign io_out_addr = {22'h0, word_counter, 3'h0};
+  assign io_busy = read_enable | write_enable | read_pending | (|fifo_count);
 endmodule
 
 module CaveFramebufferClearDma(
@@ -164,6 +166,7 @@ module CaveFramebufferClearDma(
   input         io_start,
   input  [7:0]  io_wordsPerLine,
   input  [8:0]  io_lines,
+  output        io_busy,
   output        io_out_wr,
   output [31:0] io_out_addr,
   output [63:0] io_out_din,
@@ -228,4 +231,5 @@ module CaveFramebufferClearDma(
   assign io_out_addr = {13'h0, lineReg, 10'h0} + {21'h0, wordReg, 3'h0};
   assign io_out_din = 64'h0;
   assign io_out_burstLength = burstLength;
+  assign io_busy = busyReg;
 endmodule

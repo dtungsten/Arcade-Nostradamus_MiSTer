@@ -114,7 +114,13 @@ module MemSys(
   input  [7:0]  io_systemFrameBuffer_mask,
   input  [63:0] io_systemFrameBuffer_din,
   output        io_systemFrameBuffer_wait_n,
+  output        io_romIdentity_valid,
+  output [31:0] io_romIdentity_size,
+  output [63:0] io_romIdentity_signature,
   output        io_ready
+`ifdef CAVE_HW_DIAGNOSTICS
+  ,output [11:0] io_hw_debug
+`endif
 );
   localparam [31:0] IOCTL_DOWNLOAD_BASE_ADDR = 32'h3000_0000;
 
@@ -146,6 +152,15 @@ module MemSys(
   wire        copyDmaInValid;
   wire        copyDmaInBurstDone;
   wire        copyDmaDone = ~copyDmaBusy & copyDmaBusyReg;
+
+  wire        romIdentityBusy;
+  wire        romIdentityDone;
+  wire        romIdentityDdrRd;
+  wire [31:0] romIdentityDdrAddr;
+  wire [63:0] romIdentityDdrDout;
+  wire        romIdentityDdrWaitN;
+  wire        romIdentityDdrValid;
+  wire        romIdentityDdrBurstDone;
 
   wire        progRomCacheOutRd;
   wire [24:0] progRomCacheOutAddr;
@@ -244,7 +259,8 @@ module MemSys(
       if (copyDmaDone)
         copyDmaDoneReg <= 1'b1;
 
-      readyEnableReg <= readyEnableReg | copyDmaDoneReg;
+      if (romIdentityDone)
+        readyEnableReg <= 1'b1;
     end
   end
 
@@ -289,6 +305,24 @@ module MemSys(
     .io_out_addr     (sdramDownloadBufferInAddr),
     .io_out_din      (sdramDownloadBufferInDin),
     .io_out_wait_n   (sdramDownloadBufferInWaitN)
+  );
+
+  CaveRomIdentity romIdentity (
+    .clk            (clock),
+    .reset          (reset),
+    .start          (copyDmaDone),
+    .game_index     (io_gameIndex),
+    .busy           (romIdentityBusy),
+    .done           (romIdentityDone),
+    .mem_rd         (romIdentityDdrRd),
+    .mem_addr       (romIdentityDdrAddr),
+    .mem_dout       (romIdentityDdrDout),
+    .mem_wait_n     (romIdentityDdrWaitN),
+    .mem_valid      (romIdentityDdrValid),
+    .mem_burst_done (romIdentityDdrBurstDone),
+    .identity_valid (io_romIdentity_valid),
+    .rom_size       (io_romIdentity_size),
+    .signature      (io_romIdentity_signature)
   );
 
   CaveReadCache #(
@@ -522,16 +556,16 @@ module MemSys(
     .io_in_4_valid       (io_spriteTileRom_valid),
     .io_in_4_burstLength (io_spriteTileRom_burstLength),
     .io_in_4_burstDone   (io_spriteTileRom_burstDone),
-    .io_in_5_rd          (1'b0),
+    .io_in_5_rd          (romIdentityDdrRd),
     .io_in_5_wr          (1'b0),
-    .io_in_5_addr        (32'd0),
+    .io_in_5_addr        (romIdentityDdrAddr),
     .io_in_5_mask        (8'd0),
     .io_in_5_din         (64'd0),
-    .io_in_5_dout        (),
-    .io_in_5_wait_n      (),
-    .io_in_5_valid       (),
-    .io_in_5_burstLength (8'd0),
-    .io_in_5_burstDone   (),
+    .io_in_5_dout        (romIdentityDdrDout),
+    .io_in_5_wait_n      (romIdentityDdrWaitN),
+    .io_in_5_valid       (romIdentityDdrValid),
+    .io_in_5_burstLength (8'd1),
+    .io_in_5_burstDone   (romIdentityDdrBurstDone),
     .io_out_rd           (io_ddr_rd),
     .io_out_wr           (io_ddr_wr),
     .io_out_addr         (io_ddr_addr),
@@ -637,4 +671,20 @@ module MemSys(
 
   assign io_prog_rom_wait_n = sdramDownloadBufferInWaitN;
   assign io_ready = readyEnableReg;
+`ifdef CAVE_HW_DIAGNOSTICS
+  assign io_hw_debug = {
+    romIdentityDdrRd,
+    progRomCacheOutRd,
+    progRomCacheOutWaitN,
+    progRomCacheOutValid,
+    readyEnableReg,
+    copyDmaDoneReg,
+    copyDmaStartedReg,
+    copyDmaBusyReg,
+    copyDmaDone,
+    copyDmaBusy,
+    copyDmaStart,
+    io_prog_done
+  };
+`endif
 endmodule

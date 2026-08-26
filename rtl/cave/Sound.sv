@@ -32,11 +32,12 @@ module Sound(
   input         io_options_ym_fm,
   input         io_options_oki_0,
   input         io_options_oki_1,
-  input  [2:0]  io_options_pwrinst2_oki0_level,
-  input  [2:0]  io_options_pwrinst2_oki1_level,
+  input  [3:0]  io_options_pwrinst2_oki0_level,
+  input  [3:0]  io_options_pwrinst2_oki1_level,
   input         io_options_pwrinst2_headroom,
-  input  [2:0]  io_options_pwrinst2_psg_level,
-  input  [2:0]  io_options_pwrinst2_fm_level,
+  input  [3:0]  io_options_pwrinst2_psg_level,
+  input  [3:0]  io_options_pwrinst2_fm_level,
+  input  [3:0]  io_options_ymz_level,
   output        io_rom_0_rd,
   output [24:0] io_rom_0_addr,
   input  [7:0]  io_rom_0_dout,
@@ -51,7 +52,22 @@ module Sound(
   input  [7:0]  io_rom_2_dout,
   input         io_rom_2_valid,
   output [63:0] io_debug,
-  output [15:0] io_audio
+`ifdef CAVE_PWRINST2_SOUND_DIAGNOSTICS
+  output [255:0] io_hw_debug,
+`endif
+  output [15:0] io_audio,
+  input         io_ss_hold,
+  input         io_ss_capture_request,
+  input         io_ss_restore_enable,
+  input         io_ss_restore_start,
+  input         io_ss_restore_commit,
+  input         io_ss_release,
+  output        io_ss_capture_done,
+  output        io_ss_cpu_idle,
+  output        io_ss_restore_commit_done,
+  output        io_ss_reconstruction_ready,
+  output        io_ss_idle,
+  cave_ssbus_if.slave io_ssbus
 );
   wire        donpachi;
   wire        pwrinst2;
@@ -81,6 +97,8 @@ module Sound(
 
   assign pwrinst2Z80Sound = pwrinst2 & soundDeviceIsZ80;
 
+  cave_ssbus_if soundSaveStateOwners[10]();
+
   reg         reqReg;
   reg         latchHighReadSeen;
   reg         latchLowReadSeen;
@@ -93,6 +111,7 @@ module Sound(
   reg  [4:0]  replyReadPtr;
   reg  [4:0]  replyWritePtr;
   reg  [5:0]  replyCount;
+  integer     replyResetIndex;
 
   reg  [3:0]  okiBankHiReg;
   reg  [3:0]  okiBankLoReg;
@@ -240,6 +259,38 @@ module Sound(
   wire [47:0] oki1DebugBodyBytes;
   wire        oki1DebugBodyDone;
   wire [7:0]  oki1DebugBusyState;
+  wire [7:0]  donpachiOki0CpuDout;
+  wire        donpachiOki0RomRead;
+  wire [17:0] donpachiOki0RomAddr;
+  wire        donpachiOki0AudioValid;
+  wire [13:0] donpachiOki0Audio;
+  wire        donpachiOki0SsIdle;
+  wire [7:0]  donpachiOki1CpuDout;
+  wire        donpachiOki1RomRead;
+  wire [17:0] donpachiOki1RomAddr;
+  wire        donpachiOki1AudioValid;
+  wire [13:0] donpachiOki1Audio;
+  wire        donpachiOki1SsIdle;
+  wire [7:0]  activeOki0CpuDout =
+    donpachi ? donpachiOki0CpuDout : oki0CpuDout;
+  wire [7:0]  activeOki1CpuDout =
+    donpachi ? donpachiOki1CpuDout : oki1CpuDout;
+  wire        activeOki0RomRead =
+    donpachi ? donpachiOki0RomRead : oki0RomRead;
+  wire        activeOki1RomRead =
+    donpachi ? donpachiOki1RomRead : oki1RomRead;
+  wire [17:0] activeOki0RomAddr =
+    donpachi ? donpachiOki0RomAddr : oki0RomAddr;
+  wire [17:0] activeOki1RomAddr =
+    donpachi ? donpachiOki1RomAddr : oki1RomAddr;
+  wire        activeOki0AudioValid =
+    donpachi ? donpachiOki0AudioValid : oki0AudioValid;
+  wire        activeOki1AudioValid =
+    donpachi ? donpachiOki1AudioValid : oki1AudioValid;
+  wire [13:0] activeOki0Audio =
+    donpachi ? donpachiOki0Audio : oki0Audio;
+  wire [13:0] activeOki1Audio =
+    donpachi ? donpachiOki1Audio : oki1Audio;
   wire [7:0]  ymzCpuDout;
   wire        ymzRomRd;
   wire [23:0] ymzRomAddr;
@@ -249,12 +300,30 @@ module Sound(
   wire        ymzAudioValid;
   wire [15:0] ymzAudio;
   wire        ymzIrq;
+  wire        ymzSsIdle;
 
   wire [7:0]  ym2203CpuDout;
   wire        ym2203Irq;
   wire        ym2203AudioValid;
   wire [15:0] ym2203PsgAudio;
   wire [15:0] ym2203FmAudio;
+  wire        ym2203SsIdle;
+  wire        pwrinst2Z80SsCaptureDone;
+  wire        pwrinst2Z80SsCpuIdle;
+  wire        pwrinst2Z80SsRestoreCommitDone;
+  wire        pwrinst2Z80SsReconstructionReady;
+  wire        pwrinst2Oki0SsIdle;
+  wire        pwrinst2Oki1SsIdle;
+  wire        pwrinst2Oki0RomCacheIdle;
+  wire        pwrinst2Oki1RomCacheIdle;
+  wire        pwrinst2Oki0MemRead;
+  wire [24:0] pwrinst2Oki0MemAddr;
+  wire [7:0]  pwrinst2Oki0CacheDout;
+  wire        pwrinst2Oki0CacheValid;
+  wire        pwrinst2Oki1MemRead;
+  wire [24:0] pwrinst2Oki1MemAddr;
+  wire [7:0]  pwrinst2Oki1CacheDout;
+  wire        pwrinst2Oki1CacheValid;
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
   wire [7:0]  ym2203PsgMagnitude = ym2203PsgAudio[15:8];
   wire [7:0]  ym2203FmMagnitude = ym2203FmAudio[15] ? ~ym2203FmAudio[14:7] : ym2203FmAudio[14:7];
@@ -272,6 +341,73 @@ module Sound(
   wire [15:0] nmkDin = pwrinst2NmkWrite ? {8'h00, cpuDout} : io_ctrl_nmk_din;
   wire [24:0] nmkOki0AddrOut;
   wire [24:0] nmkOki1AddrOut;
+  wire [47:0] nmkSsState;
+  wire        soundStateRestoreWr;
+  wire [31:0] soundStateRestoreAddr;
+  wire [15:0] soundStateRestoreData;
+  wire        pwrinst2MailboxRestoreWr;
+  wire [31:0] pwrinst2MailboxRestoreAddr;
+  wire [15:0] pwrinst2MailboxRestoreData;
+  wire        donpachiSoundStateEnable =
+    io_ss_hold & donpachi & donpachiOki0SsIdle & donpachiOki1SsIdle;
+  wire        pwrinst2SoundDevicesIdle =
+    pwrinst2Z80SsCpuIdle &
+    ym2203SsIdle &
+    pwrinst2Oki0SsIdle &
+    pwrinst2Oki1SsIdle &
+    pwrinst2Oki0RomCacheIdle &
+    pwrinst2Oki1RomCacheIdle;
+  wire        pwrinst2SoundStateEnable =
+    io_ss_hold & pwrinst2Z80Sound & pwrinst2SoundDevicesIdle;
+  wire        sharedSoundStateEnable =
+    donpachiSoundStateEnable | pwrinst2SoundStateEnable;
+  wire        nmkSsWr =
+    soundStateRestoreWr & (soundStateRestoreAddr < 32'd8);
+  wire [191:0] sharedSoundState = {
+    ym2203FmAudioReg,
+    ym2203PsgAudioReg,
+    {2'd0, oki1AudioReg},
+    {2'd0, oki0AudioReg},
+    {10'd0, nmkSsState[47:42]},
+    {10'd0, nmkSsState[41:36]},
+    {10'd0, nmkSsState[35:30]},
+    {10'd0, nmkSsState[29:24]},
+    {10'd0, nmkSsState[23:18]},
+    {10'd0, nmkSsState[17:12]},
+    {10'd0, nmkSsState[11:6]},
+    {10'd0, nmkSsState[5:0]}
+  };
+  wire [319:0] pwrinst2MailboxState;
+  assign pwrinst2MailboxState[15:0] = dataReg;
+  assign pwrinst2MailboxState[31:16] = {
+    1'b0,
+    z80IoWrAddrD,
+    z80IoWrD,
+    z80BankReg,
+    latchLowReadSeen,
+    latchHighReadSeen,
+    reqReg
+  };
+  assign pwrinst2MailboxState[47:32] = {8'd0, z80IoWrDataD};
+  assign pwrinst2MailboxState[63:48] = {
+    replyCount,
+    replyWritePtr,
+    replyReadPtr
+  };
+  genvar pwrinst2ReplyStateIndex;
+  generate
+    for (pwrinst2ReplyStateIndex = 0;
+         pwrinst2ReplyStateIndex < 16;
+         pwrinst2ReplyStateIndex = pwrinst2ReplyStateIndex + 1)
+        begin : pwrinst2_reply_state
+      assign pwrinst2MailboxState[
+        ((pwrinst2ReplyStateIndex + 4) * 16) +: 16
+      ] = {
+        replyFifo[(pwrinst2ReplyStateIndex * 2) + 1],
+        replyFifo[pwrinst2ReplyStateIndex * 2]
+      };
+    end
+  endgenerate
   wire [3:0]  oki0Bank = oki0RomAddr[17] ? okiBankHiReg : okiBankLoReg;
   wire [3:0]  oki1Bank = oki1RomAddr[17] ? okiBankHiReg : okiBankLoReg;
   wire [24:0] bankedOki0MappedAddr = {4'h0, oki0Bank, oki0RomAddr[16:0]};
@@ -290,11 +426,11 @@ module Sound(
   wire [24:0] oki1MappedAddr = (donpachi | pwrinst2Z80Sound) ? nmkOki1AddrOut : bankedOki1MappedAddr;
   wire        pwrinst2Oki0TableRead = pwrinst2Z80Sound & oki0RomRead & pwrinst2Oki0TableRegion;
   wire        pwrinst2Oki0BodyRead = pwrinst2Z80Sound & oki0RomRead & (oki0RomAddr[17:10] != 8'h00);
-  wire [7:0]  oki0RomData = pwrinst2Z80Sound ? io_rom_1_dout : oki0RomDout;
-  wire        oki0RomDataValid = pwrinst2Z80Sound ? io_rom_1_valid : oki0RomValid;
-  wire [7:0]  oki1RomData = pwrinst2Z80Sound ? io_rom_2_dout : io_rom_1_dout;
-  wire        oki1RomDataValid = pwrinst2Z80Sound ? io_rom_2_valid : io_rom_1_valid;
-  wire [15:0] ym2203PsgMix = io_options_ym_psg ? ym2203PsgAudioReg : 16'h4000;
+  wire [7:0]  oki0RomData = pwrinst2Z80Sound ? pwrinst2Oki0CacheDout : oki0RomDout;
+  wire        oki0RomDataValid = pwrinst2Z80Sound ? pwrinst2Oki0CacheValid : oki0RomValid;
+  wire [7:0]  oki1RomData = pwrinst2Z80Sound ? pwrinst2Oki1CacheDout : io_rom_1_dout;
+  wire        oki1RomDataValid = pwrinst2Z80Sound ? pwrinst2Oki1CacheValid : io_rom_1_valid;
+  wire [15:0] ym2203PsgMix = io_options_ym_psg ? ym2203PsgAudioReg : 16'h0000;
   wire [15:0] ym2203FmMix = io_options_ym_fm ? ym2203FmAudioReg : 16'h0000;
   wire [13:0] oki0Mix = io_options_oki_0 ? oki0AudioReg : 14'h0000;
   wire [13:0] oki1Mix = io_options_oki_1 ? oki1AudioReg : 14'h0000;
@@ -306,9 +442,163 @@ module Sound(
   wire [16:0] oki0CenStep = pwrinst2Z80Sound ? 17'h1800 : 17'h0873;
   wire [16:0] oki1CenStep = pwrinst2Z80Sound ? 17'h1800 : 17'h10E5;
   wire        okiPin7Ss = ~pwrinst2Z80Sound;
-  // F0: E1 PI2 sound baseline reused for Gogetsuji Legends bring-up.
-  wire        pwrinst2Oki0IgnoreBusyStart = 1'b0;
-  wire        pwrinst2Oki0DuplicateBusyStartFilter = pwrinst2Z80Sound;
+  wire        pwrinst2Oki0IgnoreBusyStart = pwrinst2Z80Sound;
+  wire        pwrinst2Oki0DuplicateBusyStartFilter = 1'b0;
+
+`ifdef CAVE_PWRINST2_SOUND_DIAGNOSTICS
+  reg         hwdiagRomValidD = 1'b0;
+  reg  [15:0] hwdiagLastCompletedAddr = 16'd0;
+  reg  [31:0] hwdiagRomCompletionCount = 32'd0;
+  reg  [15:0] hwdiagIoWriteCount = 16'd0;
+  reg  [7:0]  hwdiagActivity = 8'd0;
+  reg  [7:0]  hwdiagAudioPeak = 8'd0;
+  reg         hwdiagCtrlReqD = 1'b0;
+  reg         hwdiagLatchHighD = 1'b0;
+  reg         hwdiagLatchLowD = 1'b0;
+  reg  [15:0] hwdiagMainReqCount = 16'd0;
+  reg  [15:0] hwdiagLastCommand = 16'd0;
+  reg  [15:0] hwdiagLatchHighCount = 16'd0;
+  reg  [15:0] hwdiagLatchLowCount = 16'd0;
+  reg  [7:0]  hwdiagLastIoAddr = 8'd0;
+  reg  [7:0]  hwdiagLastIoData = 8'd0;
+  reg  [7:0]  hwdiagLastYmRegister = 8'd0;
+  reg  [15:0] hwdiagYmKeyOnCount = 16'd0;
+  reg         hwdiagOki0PhrasePending = 1'b0;
+  reg         hwdiagOki1PhrasePending = 1'b0;
+  reg  [15:0] hwdiagOki0StartCount = 16'd0;
+  reg  [15:0] hwdiagOki1StartCount = 16'd0;
+
+  wire [15:0] hwdiagAudioMagnitude =
+    io_audio[15] ? (~io_audio + 16'd1) : io_audio;
+  wire [11:0] hwdiagCurrentFlags = {
+    pwrinst2Z80Sound,
+    reset,
+    z80WaitN,
+    z80RomRead,
+    z80RomValid,
+    io_rom_0_wait_n,
+    io_rom_0_valid,
+    cpuMreq,
+    cpuIorq,
+    cpuRd,
+    cpuWr,
+    reqReg
+  };
+
+  always @(posedge clock) begin
+    if (reset) begin
+      hwdiagRomValidD <= 1'b0;
+      hwdiagLastCompletedAddr <= 16'd0;
+      hwdiagRomCompletionCount <= 32'd0;
+      hwdiagIoWriteCount <= 16'd0;
+      hwdiagActivity <= 8'd0;
+      hwdiagAudioPeak <= 8'd0;
+      hwdiagCtrlReqD <= 1'b0;
+      hwdiagLatchHighD <= 1'b0;
+      hwdiagLatchLowD <= 1'b0;
+      hwdiagMainReqCount <= 16'd0;
+      hwdiagLastCommand <= 16'd0;
+      hwdiagLatchHighCount <= 16'd0;
+      hwdiagLatchLowCount <= 16'd0;
+      hwdiagLastIoAddr <= 8'd0;
+      hwdiagLastIoData <= 8'd0;
+      hwdiagLastYmRegister <= 8'd0;
+      hwdiagYmKeyOnCount <= 16'd0;
+      hwdiagOki0PhrasePending <= 1'b0;
+      hwdiagOki1PhrasePending <= 1'b0;
+      hwdiagOki0StartCount <= 16'd0;
+      hwdiagOki1StartCount <= 16'd0;
+    end
+    else begin
+      hwdiagRomValidD <= z80RomRead & z80RomValid;
+      hwdiagCtrlReqD <= io_ctrl_req;
+      hwdiagLatchHighD <= latchHighRead;
+      hwdiagLatchLowD <= latchLowRead;
+
+      if (io_ctrl_req && !hwdiagCtrlReqD) begin
+        hwdiagMainReqCount <= hwdiagMainReqCount + 16'd1;
+        hwdiagLastCommand <= io_ctrl_data;
+      end
+      if (latchHighRead && !hwdiagLatchHighD)
+        hwdiagLatchHighCount <= hwdiagLatchHighCount + 16'd1;
+      if (latchLowRead && !hwdiagLatchLowD)
+        hwdiagLatchLowCount <= hwdiagLatchLowCount + 16'd1;
+
+      if (z80RomRead && z80RomValid &&
+          (!hwdiagRomValidD || cpuAddr != hwdiagLastCompletedAddr)) begin
+        hwdiagLastCompletedAddr <= cpuAddr;
+        hwdiagRomCompletionCount <= hwdiagRomCompletionCount + 32'd1;
+        hwdiagActivity[7] <= 1'b1;
+      end
+
+      if (z80IoWrPulse) begin
+        hwdiagIoWriteCount <= hwdiagIoWriteCount + 16'd1;
+        hwdiagActivity[6] <= 1'b1;
+        hwdiagLastIoAddr <= cpuIoAddr[7:0];
+        hwdiagLastIoData <= cpuDout;
+      end
+      if (ym2203Write) begin
+        hwdiagActivity[5] <= 1'b1;
+        if (!cpuAddr[0])
+          hwdiagLastYmRegister <= cpuDout;
+        else if ((hwdiagLastYmRegister == 8'h28) &&
+                 (cpuDout[7:4] != 4'd0))
+          hwdiagYmKeyOnCount <= hwdiagYmKeyOnCount + 16'd1;
+      end
+      if (oki0CpuWr) begin
+        hwdiagActivity[4] <= 1'b1;
+        if (cpuDout[7])
+          hwdiagOki0PhrasePending <= 1'b1;
+        else if (hwdiagOki0PhrasePending) begin
+          hwdiagOki0PhrasePending <= 1'b0;
+          if (cpuDout[7:4] != 4'd0)
+            hwdiagOki0StartCount <= hwdiagOki0StartCount + 16'd1;
+        end
+      end
+      if (oki1CpuWr) begin
+        hwdiagActivity[3] <= 1'b1;
+        if (cpuDout[7])
+          hwdiagOki1PhrasePending <= 1'b1;
+        else if (hwdiagOki1PhrasePending) begin
+          hwdiagOki1PhrasePending <= 1'b0;
+          if (cpuDout[7:4] != 4'd0)
+            hwdiagOki1StartCount <= hwdiagOki1StartCount + 16'd1;
+        end
+      end
+      if (ym2203AudioValid &&
+          ((ym2203PsgAudio != 16'd0) || (ym2203FmAudio != 16'd0)))
+        hwdiagActivity[2] <= 1'b1;
+      if (oki0AudioValid && (oki0Audio != 14'd0))
+        hwdiagActivity[1] <= 1'b1;
+      if (oki1AudioValid && (oki1Audio != 14'd0))
+        hwdiagActivity[0] <= 1'b1;
+
+      if (hwdiagAudioMagnitude[15:8] > hwdiagAudioPeak)
+        hwdiagAudioPeak <= hwdiagAudioMagnitude[15:8];
+    end
+  end
+
+  assign io_hw_debug = {
+    16'hC5D1,
+    io_gameIndex,
+    hwdiagCurrentFlags,
+    cpuAddr,
+    hwdiagLastCompletedAddr,
+    hwdiagRomCompletionCount,
+    hwdiagIoWriteCount,
+    hwdiagActivity,
+    hwdiagAudioPeak,
+    hwdiagMainReqCount,
+    hwdiagLastCommand,
+    hwdiagLatchHighCount,
+    hwdiagLatchLowCount,
+    hwdiagLastIoAddr,
+    hwdiagLastIoData,
+    hwdiagYmKeyOnCount,
+    hwdiagOki0StartCount,
+    hwdiagOki1StartCount
+  };
+`endif
 
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
   wire [3:0]  debugOki0CurrentBusyOverlap = oki0CpuDout[3:0] & oki0CpuDin[7:4];
@@ -438,6 +728,10 @@ module Sound(
       replyReadPtr <= 5'd0;
       replyWritePtr <= 5'd0;
       replyCount <= 6'd0;
+      for (replyResetIndex = 0;
+           replyResetIndex < 32;
+           replyResetIndex = replyResetIndex + 1)
+        replyFifo[replyResetIndex] <= 8'd0;
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
       debugLastSoundCommand <= 8'h0;
       debugOki0PhraseCommand <= 8'h0;
@@ -493,7 +787,38 @@ module Sound(
       debugCfDataLow <= 8'h00;
 `endif
     end
-    else begin
+    else if (pwrinst2MailboxRestoreWr) begin
+      case (pwrinst2MailboxRestoreAddr)
+        32'd0: dataReg <= pwrinst2MailboxRestoreData;
+        32'd1: begin
+          reqReg <= pwrinst2MailboxRestoreData[0];
+          latchHighReadSeen <= pwrinst2MailboxRestoreData[1];
+          latchLowReadSeen <= pwrinst2MailboxRestoreData[2];
+          z80BankReg <= pwrinst2MailboxRestoreData[5:3];
+          z80IoWrD <= pwrinst2MailboxRestoreData[6];
+          z80IoWrAddrD <= pwrinst2MailboxRestoreData[14:7];
+        end
+        32'd2:
+          z80IoWrDataD <= pwrinst2MailboxRestoreData[7:0];
+        32'd3: begin
+          replyReadPtr <= pwrinst2MailboxRestoreData[4:0];
+          replyWritePtr <= pwrinst2MailboxRestoreData[9:5];
+          replyCount <= pwrinst2MailboxRestoreData[15:10];
+        end
+        default: begin
+          if (pwrinst2MailboxRestoreAddr >= 32'd4 &&
+              pwrinst2MailboxRestoreAddr < 32'd20) begin
+            replyFifo[
+              (pwrinst2MailboxRestoreAddr - 32'd4) << 1
+            ] <= pwrinst2MailboxRestoreData[7:0];
+            replyFifo[
+              ((pwrinst2MailboxRestoreAddr - 32'd4) << 1) + 1
+            ] <= pwrinst2MailboxRestoreData[15:8];
+          end
+        end
+      endcase
+    end
+    else if (!io_ss_hold) begin
       z80IoWrD <= z80IoWr & z80IoWrReady;
       if (z80IoWr & z80IoWrReady) begin
         z80IoWrAddrD <= cpuIoAddr[7:0];
@@ -664,51 +989,112 @@ module Sound(
 `endif
     end
 
-    if (ymzAudioValid)
+    if (reset)
+      ymzAudioReg <= 16'd0;
+    else if (io_ss_hold && io_ss_restore_enable &&
+             soundDeviceIsYmz && ymzSsIdle)
+      // At the canonical idle point the held sample is the clamped YMZ
+      // accumulator, so it can be reconstructed without another state word.
+      ymzAudioReg <= ymzAudio;
+    else if (ymzAudioValid)
       ymzAudioReg <= ymzAudio;
 
-    if (ym2203AudioValid) begin
-      ym2203PsgAudioReg <= ym2203PsgAudio;
-      ym2203FmAudioReg <= ym2203FmAudio;
+    if (reset) begin
+      ym2203PsgAudioReg <= 16'd0;
+      ym2203FmAudioReg <= 16'd0;
+      oki0AudioReg <= 14'd0;
+      oki1AudioReg <= 14'd0;
+    end else begin
+      if (soundStateRestoreWr &&
+          (soundStateRestoreAddr == 32'd10)) begin
+        ym2203PsgAudioReg <= soundStateRestoreData;
+      end else if (ym2203AudioValid) begin
+        ym2203PsgAudioReg <= ym2203PsgAudio;
+      end
+
+      if (soundStateRestoreWr &&
+          (soundStateRestoreAddr == 32'd11)) begin
+        ym2203FmAudioReg <= soundStateRestoreData;
+      end else if (ym2203AudioValid) begin
+        ym2203FmAudioReg <= ym2203FmAudio;
+      end
+
+      if (soundStateRestoreWr &&
+          (soundStateRestoreAddr == 32'd8))
+        oki0AudioReg <= soundStateRestoreData[13:0];
+      else if (activeOki0AudioValid)
+        oki0AudioReg <= activeOki0Audio;
+
+      if (soundStateRestoreWr &&
+          (soundStateRestoreAddr == 32'd9))
+        oki1AudioReg <= soundStateRestoreData[13:0];
+      else if (activeOki1AudioValid)
+        oki1AudioReg <= activeOki1Audio;
     end
-
-    if (oki0AudioValid)
-      oki0AudioReg <= oki0Audio;
-
-    if (oki1AudioValid)
-      oki1AudioReg <= oki1Audio;
   end
 
-  CaveSoundZ80Cpu cpu (
-    .clock         (clock),
-    .reset         (reset | ~pwrinst2Z80Sound),
-    .io_addr       (cpuAddr),
-    .io_din        (cpuDin),
-    .io_dout       (cpuDout),
-    .io_rd         (cpuRd),
-    .io_wr         (cpuWr),
-    .io_rfsh       (cpuRfsh),
-    .io_mreq       (cpuMreq),
-    .io_iorq       (cpuIorq),
-    .io_fast_clock (1'b1),
-    .io_wait_n     (z80WaitN),
-    .io_int        (cpuInt),
-    .io_nmi        (reqReg)
+  CaveSoundZ80Cpu #(
+    .SS_IDX(8'd32)
+  ) cpu (
+    .clock                         (clock),
+    .reset                         (reset | ~pwrinst2Z80Sound),
+    .io_ss_hold                    (io_ss_hold & pwrinst2Z80Sound),
+    .io_ss_capture_request         (
+      io_ss_capture_request & pwrinst2Z80Sound
+    ),
+    .io_ss_restore_enable          (
+      io_ss_restore_enable & pwrinst2Z80Sound
+    ),
+    .io_ss_restore_start           (
+      io_ss_restore_start & pwrinst2Z80Sound
+    ),
+    .io_ss_restore_commit          (
+      io_ss_restore_commit & pwrinst2Z80Sound
+    ),
+    .io_ss_release                 (io_ss_release & pwrinst2Z80Sound),
+    .io_ss_capture_done            (pwrinst2Z80SsCaptureDone),
+    .io_ss_cpu_idle                (pwrinst2Z80SsCpuIdle),
+    .io_ss_restore_commit_done     (
+      pwrinst2Z80SsRestoreCommitDone
+    ),
+    .io_ss_reconstruction_ready    (
+      pwrinst2Z80SsReconstructionReady
+    ),
+    .io_addr                       (cpuAddr),
+    .io_din                        (cpuDin),
+    .io_dout                       (cpuDout),
+    .io_rd                         (cpuRd),
+    .io_wr                         (cpuWr),
+    .io_rfsh                       (cpuRfsh),
+    .io_mreq                       (cpuMreq),
+    .io_iorq                       (cpuIorq),
+    .io_fast_clock                 (1'b1),
+    .io_wait_n                     (z80WaitN),
+    .io_int                        (cpuInt),
+    .io_nmi                        (reqReg),
+    .ssbus                         (soundSaveStateOwners[4])
   );
 
-  CaveSinglePortRam #(
+  CaveSaveStateSinglePortRam #(
     .ADDR_WIDTH  (13),
     .DATA_WIDTH  (8),
     .DEPTH       (0),
-    .MASK_ENABLE (0)
+    .MASK_ENABLE (0),
+    .SS_IDX      (8'd33),
+    .STREAM_WIDTH(2'd0)
   ) soundRam (
-    .clock (clock),
-    .rd    (soundRamRd),
-    .wr    (soundRamWr),
-    .addr  (cpuAddr[12:0]),
-    .mask  (1'b0),
-    .din   (cpuDout),
-    .dout  (soundRamDout)
+    .clock          (clock),
+    .reset          (reset | ~pwrinst2Z80Sound),
+    .state_enable   (pwrinst2SoundStateEnable),
+    .restore_enable (io_ss_restore_enable & pwrinst2Z80Sound),
+    .rd             (soundRamRd),
+    .wr             (soundRamWr),
+    .addr           (cpuAddr[12:0]),
+    .mask           (1'b0),
+    .din            (cpuDout),
+    .dout           (soundRamDout),
+    .blocked_access (),
+    .ssbus          (soundSaveStateOwners[5])
   );
 
   NMK112 nmk (
@@ -716,20 +1102,54 @@ module Sound(
     .reset           (reset),
     .io_page_table_0 (pwrinst2Z80Sound),
     .io_page_six_bit (pwrinst2Z80Sound),
-    .io_cpu_wr       (nmkWr),
+    .io_cpu_wr       (nmkWr & ~io_ss_hold),
     .io_cpu_addr     (nmkAddr),
     .io_cpu_din      (nmkDin),
-    .io_addr_0_in    ({7'h00, oki0RomAddr}),
+    .io_ss_wr        (nmkSsWr),
+    .io_ss_addr      (soundStateRestoreAddr[2:0]),
+    .io_ss_din       (soundStateRestoreData[5:0]),
+    .io_ss_state     (nmkSsState),
+    .io_addr_0_in    ({7'h00, activeOki0RomAddr}),
     .io_addr_0_out   (nmkOki0AddrOut),
-    .io_addr_1_in    ({7'h00, oki1RomAddr}),
+    .io_addr_1_in    ({7'h00, activeOki1RomAddr}),
     .io_addr_1_out   (nmkOki1AddrOut)
   );
 
-  CaveOKIM6295 #(
-    .INTERPOL (2)
+  CavePwrInst2OkiRomCache pwrinst2_oki_0_rom_cache (
+    .clock           (clock),
+    .reset           (reset | ~pwrinst2Z80Sound | io_ss_hold),
+    .io_client_rd    (oki0RomRead),
+    .io_client_addr  (oki0MappedAddr),
+    .io_client_dout  (pwrinst2Oki0CacheDout),
+    .io_client_valid (pwrinst2Oki0CacheValid),
+    .io_mem_rd       (pwrinst2Oki0MemRead),
+    .io_mem_addr     (pwrinst2Oki0MemAddr),
+    .io_mem_dout     (io_rom_1_dout),
+    .io_mem_valid    (io_rom_1_valid),
+    .io_idle         (pwrinst2Oki0RomCacheIdle)
+  );
+
+  CavePwrInst2OkiRomCache pwrinst2_oki_1_rom_cache (
+    .clock           (clock),
+    .reset           (reset | ~pwrinst2Z80Sound | io_ss_hold),
+    .io_client_rd    (oki1RomRead),
+    .io_client_addr  (oki1MappedAddr),
+    .io_client_dout  (pwrinst2Oki1CacheDout),
+    .io_client_valid (pwrinst2Oki1CacheValid),
+    .io_mem_rd       (pwrinst2Oki1MemRead),
+    .io_mem_addr     (pwrinst2Oki1MemAddr),
+    .io_mem_dout     (io_rom_2_dout),
+    .io_mem_valid    (io_rom_2_valid),
+    .io_idle         (pwrinst2Oki1RomCacheIdle)
+  );
+
+  CavePwrInst2OKIM6295 #(
+    .SS_IDX(8'd36),
+    .FIR_COEFFS("jt6295_up4_soft.hex"),
+    .FIXED_SAMPLE_CLOCK(1)
   ) oki_0 (
     .clock             (clock),
-    .reset             (reset),
+    .reset             (reset | ~pwrinst2Z80Sound),
     .io_cen_step       (oki0CenStep),
     .io_ss             (okiPin7Ss),
     .io_cpu_wr         (oki0CpuWr),
@@ -757,28 +1177,36 @@ module Sound(
     .io_debug_table_bytes (oki0DebugTableBytes),
     .io_debug_body_bytes (oki0DebugBodyBytes),
     .io_debug_body_done (oki0DebugBodyDone),
-    .io_debug_busy_state (oki0DebugBusyState)
+    .io_debug_busy_state (oki0DebugBusyState),
+    .io_ss_hold         (io_ss_hold & pwrinst2Z80Sound),
+    .io_ss_restore_enable(
+      io_ss_restore_enable & pwrinst2Z80Sound
+    ),
+    .io_ss_idle         (pwrinst2Oki0SsIdle),
+    .io_ssbus           (soundSaveStateOwners[8])
   );
 
-  CaveOKIM6295 #(
-    .INTERPOL (2)
+  CavePwrInst2OKIM6295 #(
+    .SS_IDX(8'd37),
+    .FIR_COEFFS("jt6295_up4_soft.hex"),
+    .FIXED_SAMPLE_CLOCK(1)
   ) oki_1 (
     .clock             (clock),
-    .reset             (reset),
+    .reset             (reset | ~pwrinst2Z80Sound),
     .io_cen_step       (oki1CenStep),
     .io_ss             (okiPin7Ss),
     .io_cpu_wr         (oki1CpuWr),
     .io_cpu_din        (oki1CpuDin),
     .io_stretch_cpu_wr (1'b0),
     .io_wait_for_rom   (pwrinst2Z80Sound),
-    .io_ignore_busy_start (1'b0),
+    .io_ignore_busy_start (pwrinst2Z80Sound),
     .io_duplicate_busy_start_filter (1'b0),
     .io_restart_busy_start (1'b0),
     .io_restart_mute_busy_start (1'b0),
     .io_reset_adpcm_on_start (1'b0),
     .io_status_includes_start (1'b1),
     .io_debug_capture_enable (1'b0),
-    .io_align_ctrl_ok  (1'b0),
+    .io_align_ctrl_ok  (pwrinst2Z80Sound),
     .io_cpu_dout       (oki1CpuDout),
     .io_rom_rd         (oki1RomRead),
     .io_rom_addr       (oki1RomAddr),
@@ -792,7 +1220,57 @@ module Sound(
     .io_debug_table_bytes (oki1DebugTableBytes),
     .io_debug_body_bytes (oki1DebugBodyBytes),
     .io_debug_body_done (oki1DebugBodyDone),
-    .io_debug_busy_state (oki1DebugBusyState)
+    .io_debug_busy_state (oki1DebugBusyState),
+    .io_ss_hold         (io_ss_hold & pwrinst2Z80Sound),
+    .io_ss_restore_enable(
+      io_ss_restore_enable & pwrinst2Z80Sound
+    ),
+    .io_ss_idle         (pwrinst2Oki1SsIdle),
+    .io_ssbus           (soundSaveStateOwners[9])
+  );
+
+  CaveDonPachiOKIM6295 #(
+    .SS_IDX   (8'd36),
+    .CEN_STEP (17'h0873)
+  ) donpachi_oki_0 (
+    .clock                (clock),
+    .reset                (reset | ~donpachi),
+    .io_ss                (1'b1),
+    .io_cpu_wr            (donpachi & io_ctrl_oki_0_wr),
+    .io_cpu_din           (io_ctrl_oki_0_din[7:0]),
+    .io_cpu_dout          (donpachiOki0CpuDout),
+    .io_rom_rd            (donpachiOki0RomRead),
+    .io_rom_addr          (donpachiOki0RomAddr),
+    .io_rom_dout          (oki0RomData),
+    .io_rom_valid         (oki0RomDataValid),
+    .io_audio_valid       (donpachiOki0AudioValid),
+    .io_audio             (donpachiOki0Audio),
+    .io_ss_hold           (io_ss_hold & donpachi),
+    .io_ss_restore_enable (io_ss_restore_enable & donpachi),
+    .io_ss_idle           (donpachiOki0SsIdle),
+    .io_ssbus             (soundSaveStateOwners[1])
+  );
+
+  CaveDonPachiOKIM6295 #(
+    .SS_IDX   (8'd37),
+    .CEN_STEP (17'h10E5)
+  ) donpachi_oki_1 (
+    .clock                (clock),
+    .reset                (reset | ~donpachi),
+    .io_ss                (1'b1),
+    .io_cpu_wr            (donpachi & io_ctrl_oki_1_wr),
+    .io_cpu_din           (io_ctrl_oki_1_din[7:0]),
+    .io_cpu_dout          (donpachiOki1CpuDout),
+    .io_rom_rd            (donpachiOki1RomRead),
+    .io_rom_addr          (donpachiOki1RomAddr),
+    .io_rom_dout          (oki1RomData),
+    .io_rom_valid         (oki1RomDataValid),
+    .io_audio_valid       (donpachiOki1AudioValid),
+    .io_audio             (donpachiOki1Audio),
+    .io_ss_hold           (io_ss_hold & donpachi),
+    .io_ss_restore_enable (io_ss_restore_enable & donpachi),
+    .io_ss_idle           (donpachiOki1SsIdle),
+    .io_ssbus             (soundSaveStateOwners[2])
   );
 
   YMZ280B ymz280b (
@@ -810,10 +1288,62 @@ module Sound(
     .io_rom_valid       (ymzRomValid),
     .io_audio_valid     (ymzAudioValid),
     .io_audio_bits_left (ymzAudio),
-    .io_irq             (ymzIrq)
+    .io_irq             (ymzIrq),
+    .io_ss_hold         (io_ss_hold & soundDeviceIsYmz),
+    .io_ss_restore_enable(io_ss_restore_enable & soundDeviceIsYmz),
+    .io_ss_idle         (ymzSsIdle),
+    .io_ssbus           (soundSaveStateOwners[0])
   );
 
-  YM2203 ym2203 (
+  CaveSaveStateRegisterPort #(
+    .WIDTH        (16),
+    .COUNT        (12),
+    .SS_IDX       (8'd38),
+    .STREAM_WIDTH (2'd1)
+  ) shared_sound_state (
+    .clk            (clock),
+    .reset          (reset),
+    .state_enable   (sharedSoundStateEnable),
+    .restore_enable (
+      io_ss_restore_enable & (donpachi | pwrinst2Z80Sound)
+    ),
+    .capture_data   (sharedSoundState),
+    .restore_wr     (soundStateRestoreWr),
+    .restore_addr   (soundStateRestoreAddr),
+    .restore_data   (soundStateRestoreData),
+    .blocked_access (),
+    .ssbus          (soundSaveStateOwners[3])
+  );
+
+  CaveSaveStateRegisterPort #(
+    .WIDTH        (16),
+    .COUNT        (20),
+    .SS_IDX       (8'd34),
+    .STREAM_WIDTH (2'd1)
+  ) pwrinst2_mailbox_state (
+    .clk            (clock),
+    .reset          (reset | ~pwrinst2Z80Sound),
+    .state_enable   (pwrinst2SoundStateEnable),
+    .restore_enable (io_ss_restore_enable & pwrinst2Z80Sound),
+    .capture_data   (pwrinst2MailboxState),
+    .restore_wr     (pwrinst2MailboxRestoreWr),
+    .restore_addr   (pwrinst2MailboxRestoreAddr),
+    .restore_data   (pwrinst2MailboxRestoreData),
+    .blocked_access (),
+    .ssbus          (soundSaveStateOwners[6])
+  );
+
+  CaveSaveStateBusMux #(
+    .COUNT (10)
+  ) sound_save_state_bus (
+    .clk    (clock),
+    .owners (soundSaveStateOwners),
+    .stream (io_ssbus)
+  );
+
+  CavePwrInst2YM2203 #(
+    .SS_IDX(8'd35)
+  ) ym2203 (
     .clock             (clock),
     .reset             (reset | ~pwrinst2Z80Sound),
     .io_cpu_wr         (ym2203Write),
@@ -825,13 +1355,19 @@ module Sound(
     .io_irq            (ym2203Irq),
     .io_audio_valid    (ym2203AudioValid),
     .io_audio_bits_psg (ym2203PsgAudio),
-    .io_audio_bits_fm  (ym2203FmAudio)
+    .io_audio_bits_fm  (ym2203FmAudio),
+    .io_ss_hold        (io_ss_hold & pwrinst2Z80Sound),
+    .io_ss_restore_enable(
+      io_ss_restore_enable & pwrinst2Z80Sound
+    ),
+    .io_ss_idle        (ym2203SsIdle),
+    .io_ssbus          (soundSaveStateOwners[7])
   );
 
   CaveSoundRomReadArbiter arbiter (
     .clock          (clock),
     .reset          (reset),
-    .io_in_0_rd     (soundDeviceIsOki & ~pwrinst2Z80Sound & oki0RomRead),
+    .io_in_0_rd     (soundDeviceIsOki & ~pwrinst2Z80Sound & activeOki0RomRead),
     .io_in_0_addr   (oki0MappedAddr),
     .io_in_0_dout   (oki0RomDout),
     .io_in_0_valid  (oki0RomValid),
@@ -858,11 +1394,14 @@ module Sound(
   AudioMixer io_audio_mixer (
     .clock       (clock),
     .io_pwrinst2 (pwrinst2Z80Sound),
+    .io_ymz      (soundDeviceIsYmz),
+    .io_legacy_oki (soundDeviceIsOki),
     .io_pwrinst2_oki0_level (io_options_pwrinst2_oki0_level),
     .io_pwrinst2_oki1_level (io_options_pwrinst2_oki1_level),
     .io_pwrinst2_headroom (io_options_pwrinst2_headroom),
     .io_pwrinst2_psg_level (io_options_pwrinst2_psg_level),
     .io_pwrinst2_fm_level  (io_options_pwrinst2_fm_level),
+    .io_ymz_level           (io_options_ymz_level),
     .io_in_4     (oki1Mix),
     .io_in_3     (oki0Mix),
     .io_in_2     (pwrinst2Z80Sound ? ym2203FmMix : 16'h0000),
@@ -873,11 +1412,24 @@ module Sound(
 
   assign cpuInt = pwrinst2Z80Sound & ym2203Irq;
   assign io_ctrl_irq = soundDeviceIsYmz & ymzIrq;
-  assign io_ctrl_oki_0_dout = {8'h00, oki0CpuDout};
-  assign io_ctrl_oki_1_dout = {8'h00, oki1CpuDout};
+  assign io_ctrl_oki_0_dout = {8'h00, activeOki0CpuDout};
+  assign io_ctrl_oki_1_dout = {8'h00, activeOki1CpuDout};
   assign io_ctrl_ymz_dout = {8'h00, ymzCpuDout};
   assign io_ctrl_reply = (replyCount == 6'd0) ? 16'h00ff : {8'h00, replyFifo[replyReadPtr]};
   assign io_ctrl_reply_empty = replyCount == 6'd0;
+  assign io_ss_capture_done =
+    pwrinst2Z80Sound ? pwrinst2Z80SsCaptureDone : 1'b1;
+  assign io_ss_cpu_idle =
+    pwrinst2Z80Sound ? pwrinst2Z80SsCpuIdle : 1'b1;
+  assign io_ss_restore_commit_done =
+    pwrinst2Z80Sound ? pwrinst2Z80SsRestoreCommitDone : 1'b1;
+  assign io_ss_reconstruction_ready =
+    pwrinst2Z80Sound ? pwrinst2Z80SsReconstructionReady : 1'b1;
+  assign io_ss_idle =
+    soundDeviceIsYmz ? ymzSsIdle :
+    donpachi ? (donpachiOki0SsIdle & donpachiOki1SsIdle) :
+    pwrinst2Z80Sound ? pwrinst2SoundDevicesIdle :
+    1'b1;
 
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
   // Power Instinct 2 OKI0 one-shot capture:
@@ -890,8 +1442,8 @@ module Sound(
   assign io_debug = 64'd0;
 `endif
 
-  assign io_rom_1_rd = pwrinst2Z80Sound ? oki0RomRead : 1'b1;
-  assign io_rom_1_addr = pwrinst2Z80Sound ? oki0MappedAddr : oki1MappedAddr;
-  assign io_rom_2_rd = pwrinst2Z80Sound & oki1RomRead;
-  assign io_rom_2_addr = oki1MappedAddr;
+  assign io_rom_1_rd = pwrinst2Z80Sound ? pwrinst2Oki0MemRead : activeOki1RomRead;
+  assign io_rom_1_addr = pwrinst2Z80Sound ? pwrinst2Oki0MemAddr : oki1MappedAddr;
+  assign io_rom_2_rd = pwrinst2Z80Sound & pwrinst2Oki1MemRead;
+  assign io_rom_2_addr = pwrinst2Oki1MemAddr;
 endmodule

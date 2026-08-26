@@ -222,7 +222,16 @@ module CaveNvramWriteBackCache(
         burstCounter <= burstCounter + 2'b01;
     end
 
-    if (start) begin
+    if (reset) begin
+      offsetReg <= 2'b00;
+      requestReg_rd <= 1'b0;
+      requestReg_wr <= 1'b0;
+      requestReg_addr_tag <= 4'b0000;
+      requestReg_addr_index <= 1'b0;
+      requestReg_addr_offset <= 2'b00;
+      requestReg_din <= 16'h0000;
+    end
+    else if (start) begin
       offsetReg <= inAddrOffset;
       requestReg_rd <= io_in_rd;
       requestReg_wr <= io_in_wr;
@@ -232,21 +241,31 @@ module CaveNvramWriteBackCache(
       requestReg_din <= io_in_din;
     end
 
-    if (readHit)
-      doutReg <= hitA ? swap16(entry_word(wayAReadData, offsetReg)) : swap16(entry_word(wayBReadData, offsetReg));
-    else if (fillWordValid)
-      doutReg <= swap16(fillWordAtOffset);
+    if (reset) begin
+      doutReg <= 16'h0000;
+      validReg <= 1'b0;
+    end
+    else begin
+      if (readHit)
+        doutReg <= hitA ? swap16(entry_word(wayAReadData, offsetReg)) : swap16(entry_word(wayBReadData, offsetReg));
+      else if (fillWordValid)
+        doutReg <= swap16(fillWordAtOffset);
 
-    validReg <= readHit | (fillWordValid & requestReg_rd & (burstCounter == 2'b00));
+      validReg <= readHit | (fillWordValid & requestReg_rd & (burstCounter == 2'b00));
+    end
 
-    if (check) begin
+    if (reset)
+      lruReg <= 2'b00;
+    else if (check) begin
       if (hit)
         lruReg <= set_lru(lruReg, requestReg_addr_index, hitA);
       else
         lruReg <= set_lru(lruReg, requestReg_addr_index, ~wayReg);
     end
 
-    if (start)
+    if (reset)
+      wayReg <= 1'b0;
+    else if (start)
       wayReg <= lruReg[inAddrIndex];
     else if (check & hit)
       wayReg <= ~hitA;
@@ -302,6 +321,8 @@ module CaveNvramWriteBackCache(
 
   wire wayAWriteEnable = (stateReg == STATE_INIT) | (write & ~wayReg);
   wire wayBWriteEnable = (stateReg == STATE_INIT) | (write & wayReg);
+  wire cacheWriteIndex =
+    stateReg == STATE_INIT ? initCounter : requestReg_addr_index;
 
   CaveSyncReadMem #(
     .ADDR_WIDTH (1),
@@ -312,7 +333,7 @@ module CaveNvramWriteBackCache(
     .read_en    (1'b1),
     .read_clk   (clock),
     .read_data  (wayAReadData),
-    .write_addr (requestReg_addr_index),
+    .write_addr (cacheWriteIndex),
     .write_en   (wayAWriteEnable),
     .write_clk  (clock),
     .write_data (nextCacheEntry)
@@ -327,7 +348,7 @@ module CaveNvramWriteBackCache(
     .read_en    (1'b1),
     .read_clk   (clock),
     .read_data  (wayBReadData),
-    .write_addr (requestReg_addr_index),
+    .write_addr (cacheWriteIndex),
     .write_en   (wayBWriteEnable),
     .write_clk  (clock),
     .write_data (nextCacheEntry)
@@ -344,4 +365,199 @@ module CaveNvramWriteBackCache(
   assign io_out_wr = evict | evictWait;
   assign io_out_addr = {17'b0, outAddrTag, requestReg_addr_index, outAddrOffset, 1'b0};
   assign io_out_din = evictWord;
+
+`ifdef CAVE_ESPRADE_SERVICE_DIAGNOSTICS
+  reg [7:0]  espradeStartCount = 8'd0;
+  reg [7:0]  espradeCheckCount = 8'd0;
+  reg [7:0]  espradeHitCount = 8'd0;
+  reg [7:0]  espradeMissCount = 8'd0;
+  reg [7:0]  espradeFillResponseCount = 8'd0;
+  reg [1:0]  espradeActiveSlot = 2'd0;
+  reg [7:0]  espradeActiveSequence = 8'd0;
+  reg [6:0]  espradeRequestAddr0 = 7'd0;
+  reg [6:0]  espradeRequestAddr1 = 7'd0;
+  reg [6:0]  espradeRequestAddr2 = 7'd0;
+  reg [6:0]  espradeRequestAddr3 = 7'd0;
+  reg [3:0]  espradeRequestFlags0 = 4'd0;
+  reg [3:0]  espradeRequestFlags1 = 4'd0;
+  reg [3:0]  espradeRequestFlags2 = 4'd0;
+  reg [3:0]  espradeRequestFlags3 = 4'd0;
+  reg [15:0] espradeResponse0 = 16'd0;
+  reg [15:0] espradeResponse1 = 16'd0;
+  reg [15:0] espradeResponse2 = 16'd0;
+  reg [15:0] espradeResponse3 = 16'd0;
+  reg [15:0] espradeRawFill0 = 16'd0;
+  reg [15:0] espradeRawFill1 = 16'd0;
+  reg [15:0] espradeRawFill2 = 16'd0;
+  reg [15:0] espradeRawFill3 = 16'd0;
+
+  always @(posedge clock) begin
+    if (reset) begin
+      espradeStartCount <= 8'd0;
+      espradeCheckCount <= 8'd0;
+      espradeHitCount <= 8'd0;
+      espradeMissCount <= 8'd0;
+      espradeFillResponseCount <= 8'd0;
+      espradeActiveSlot <= 2'd0;
+      espradeActiveSequence <= 8'd0;
+      espradeRequestAddr0 <= 7'd0;
+      espradeRequestAddr1 <= 7'd0;
+      espradeRequestAddr2 <= 7'd0;
+      espradeRequestAddr3 <= 7'd0;
+      espradeRequestFlags0 <= 4'd0;
+      espradeRequestFlags1 <= 4'd0;
+      espradeRequestFlags2 <= 4'd0;
+      espradeRequestFlags3 <= 4'd0;
+      espradeResponse0 <= 16'd0;
+      espradeResponse1 <= 16'd0;
+      espradeResponse2 <= 16'd0;
+      espradeResponse3 <= 16'd0;
+      espradeRawFill0 <= 16'd0;
+      espradeRawFill1 <= 16'd0;
+      espradeRawFill2 <= 16'd0;
+      espradeRawFill3 <= 16'd0;
+    end
+    else begin
+      if (start) begin
+        espradeActiveSlot <= espradeStartCount[1:0];
+        espradeActiveSequence <= espradeStartCount;
+        case (espradeStartCount)
+          8'd0: begin
+            espradeRequestAddr0 <= io_in_addr;
+            espradeRequestFlags0 <= {io_in_rd, io_in_wr, 2'b00};
+          end
+          8'd1: begin
+            espradeRequestAddr1 <= io_in_addr;
+            espradeRequestFlags1 <= {io_in_rd, io_in_wr, 2'b00};
+          end
+          8'd2: begin
+            espradeRequestAddr2 <= io_in_addr;
+            espradeRequestFlags2 <= {io_in_rd, io_in_wr, 2'b00};
+          end
+          8'd3: begin
+            espradeRequestAddr3 <= io_in_addr;
+            espradeRequestFlags3 <= {io_in_rd, io_in_wr, 2'b00};
+          end
+          default: begin
+          end
+        endcase
+        espradeStartCount <= espradeStartCount + 8'd1;
+      end
+
+      if (check) begin
+        espradeCheckCount <= espradeCheckCount + 8'd1;
+        if (hit)
+          espradeHitCount <= espradeHitCount + 8'd1;
+        else
+          espradeMissCount <= espradeMissCount + 8'd1;
+        if (espradeActiveSequence < 8'd4) begin
+          case (espradeActiveSlot)
+            2'd0: espradeRequestFlags0[1:0] <= {~hit, hit};
+            2'd1: espradeRequestFlags1[1:0] <= {~hit, hit};
+            2'd2: espradeRequestFlags2[1:0] <= {~hit, hit};
+            2'd3: espradeRequestFlags3[1:0] <= {~hit, hit};
+          endcase
+        end
+      end
+
+      if (readHit && espradeActiveSequence < 8'd4) begin
+        case (espradeActiveSlot)
+          2'd0: espradeResponse0 <=
+            hitA ? swap16(entry_word(wayAReadData, offsetReg))
+                 : swap16(entry_word(wayBReadData, offsetReg));
+          2'd1: espradeResponse1 <=
+            hitA ? swap16(entry_word(wayAReadData, offsetReg))
+                 : swap16(entry_word(wayBReadData, offsetReg));
+          2'd2: espradeResponse2 <=
+            hitA ? swap16(entry_word(wayAReadData, offsetReg))
+                 : swap16(entry_word(wayBReadData, offsetReg));
+          2'd3: espradeResponse3 <=
+            hitA ? swap16(entry_word(wayAReadData, offsetReg))
+                 : swap16(entry_word(wayBReadData, offsetReg));
+        endcase
+      end
+
+      if (fillWordValid) begin
+        espradeFillResponseCount <= espradeFillResponseCount + 8'd1;
+        if (requestReg_rd && burstCounter == 2'b00 &&
+            espradeActiveSequence < 8'd4) begin
+          case (espradeActiveSlot)
+            2'd0: begin
+              espradeResponse0 <= swap16(fillWordAtOffset);
+              espradeRawFill0 <= io_out_dout;
+            end
+            2'd1: begin
+              espradeResponse1 <= swap16(fillWordAtOffset);
+              espradeRawFill1 <= io_out_dout;
+            end
+            2'd2: begin
+              espradeResponse2 <= swap16(fillWordAtOffset);
+              espradeRawFill2 <= io_out_dout;
+            end
+            2'd3: begin
+              espradeResponse3 <= swap16(fillWordAtOffset);
+              espradeRawFill3 <= io_out_dout;
+            end
+          endcase
+        end
+      end
+    end
+  end
+
+  wire [255:0] espradeCacheProbe = {
+    16'hE513,
+    4'd1,
+    espradeStartCount,
+    espradeCheckCount,
+    espradeHitCount,
+    espradeMissCount,
+    espradeFillResponseCount,
+    espradeActiveSlot,
+    espradeRequestAddr0,
+    espradeRequestAddr1,
+    espradeRequestAddr2,
+    espradeRequestAddr3,
+    espradeRequestFlags0,
+    espradeRequestFlags1,
+    espradeRequestFlags2,
+    espradeRequestFlags3,
+    espradeResponse0,
+    espradeResponse1,
+    espradeResponse2,
+    espradeResponse3,
+    espradeRawFill0,
+    espradeRawFill1,
+    espradeRawFill2,
+    espradeRawFill3,
+    stateReg[2:0],
+    hitA,
+    hitB,
+    hit,
+    selectedWay,
+    start,
+    readHit,
+    fillWordValid,
+    io_out_rd,
+    io_out_valid,
+    requestReg_addr_index,
+    requestReg_addr_offset,
+    requestReg_addr_tag,
+    burstCounter,
+    initCounter
+  };
+  wire [0:0] espradeCacheSource;
+
+  altsource_probe #(
+    .sld_auto_instance_index ("NO"),
+    .sld_instance_index      (6),
+    .instance_id             ("EEC"),
+    .probe_width             (256),
+    .source_width            (1),
+    .source_initial_value    ("0"),
+    .enable_metastability    ("NO")
+  ) espradeCacheDiagnosticsProbe (
+    .probe  (espradeCacheProbe),
+    .source (espradeCacheSource)
+  );
+`endif
 endmodule

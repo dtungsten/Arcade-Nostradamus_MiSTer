@@ -7,12 +7,16 @@ module CaveSingleRegisterFile (
   input         io_mem_wr,
   input  [1:0]  io_mem_addr,
   input  [15:0] io_mem_din,
+  input         io_ss_wr,
+  input  [15:0] io_ss_din,
   output [15:0] io_regs_0
 );
   reg [15:0] regs_0;
 
   always @(posedge clock) begin
-    if (io_mem_wr && io_mem_addr == 2'h0)
+    if (io_ss_wr)
+      regs_0 <= io_ss_din;
+    else if (io_mem_wr && io_mem_addr == 2'h0)
       regs_0 <= io_mem_din;
   end
 
@@ -26,12 +30,17 @@ module CaveControlRegisterFile (
   input  [2:0]  io_mem_addr,
   input  [1:0]  io_mem_mask,
   input  [15:0] io_mem_din,
+  input         io_ss_wr,
+  input  [2:0]  io_ss_addr,
+  input  [15:0] io_ss_din,
   output [15:0] io_regs_0,
   output [15:0] io_regs_1,
   output [15:0] io_regs_2,
   output [15:0] io_regs_3,
   output [15:0] io_regs_4,
-  output [15:0] io_regs_5
+  output [15:0] io_regs_5,
+  output [15:0] io_regs_6,
+  output [15:0] io_regs_7
 );
   reg [15:0] regs_0;
   reg [15:0] regs_1;
@@ -55,7 +64,19 @@ module CaveControlRegisterFile (
   endfunction
 
   always @(posedge clock) begin
-    if (io_mem_wr) begin
+    if (io_ss_wr) begin
+      case (io_ss_addr)
+        3'h0: regs_0 <= io_ss_din;
+        3'h1: regs_1 <= io_ss_din;
+        3'h2: regs_2 <= io_ss_din;
+        3'h3: regs_3 <= io_ss_din;
+        3'h4: regs_4 <= io_ss_din;
+        3'h5: regs_5 <= io_ss_din;
+        3'h6: regs_6 <= io_ss_din;
+        3'h7: regs_7 <= io_ss_din;
+      endcase
+    end
+    else if (io_mem_wr) begin
       case (io_mem_addr)
         3'h0: regs_0 <= apply_mask(regs_0, io_mem_din, io_mem_mask);
         3'h1: regs_1 <= apply_mask(regs_1, io_mem_din, io_mem_mask);
@@ -75,6 +96,8 @@ module CaveControlRegisterFile (
   assign io_regs_3 = regs_3;
   assign io_regs_4 = regs_4;
   assign io_regs_5 = regs_5;
+  assign io_regs_6 = regs_6;
+  assign io_regs_7 = regs_7;
 endmodule
 
 // Three visible 16-bit memory-mapped registers with byte write masks.
@@ -84,6 +107,9 @@ module CaveLayerRegisterFile (
   input  [1:0]  io_mem_addr,
   input  [1:0]  io_mem_mask,
   input  [15:0] io_mem_din,
+  input         io_ss_wr,
+  input  [1:0]  io_ss_addr,
+  input  [15:0] io_ss_din,
   output [15:0] io_mem_dout,
   output [15:0] io_regs_0,
   output [15:0] io_regs_1,
@@ -117,7 +143,16 @@ module CaveLayerRegisterFile (
   end
 
   always @(posedge clock) begin
-    if (io_mem_wr) begin
+    if (io_ss_wr) begin
+      case (io_ss_addr)
+        2'h0: regs_0 <= io_ss_din;
+        2'h1: regs_1 <= io_ss_din;
+        2'h2: regs_2 <= io_ss_din;
+        default: begin
+        end
+      endcase
+    end
+    else if (io_mem_wr) begin
       case (io_mem_addr)
         2'h0: regs_0 <= apply_mask(regs_0, io_mem_din, io_mem_mask);
         2'h1: regs_1 <= apply_mask(regs_1, io_mem_din, io_mem_mask);

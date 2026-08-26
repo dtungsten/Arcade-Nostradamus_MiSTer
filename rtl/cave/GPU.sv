@@ -6,6 +6,8 @@ module GPU(
   input          clock,
   input          reset,
   input          io_videoClock,
+  input          io_ss_hold,
+  input          io_ss_canonicalize,
   input          io_layerCtrl_0_enable,
   input  [1:0]   io_layerCtrl_0_format,
   input          io_layerCtrl_0_regs_tileSize,
@@ -128,7 +130,9 @@ module GPU(
   output [31:0]  io_systemFrameBuffer_din,
   output [14:0]  io_paletteRam_addr,
   input  [15:0]  io_paletteRam_dout,
-  output [23:0]  io_rgb
+  output [23:0]  io_rgb,
+  output         io_ss_idle,
+  output         io_ss_reconstruction_ready
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
   ,
   output [63:0]  io_debug_video,
@@ -172,13 +176,9 @@ module GPU(
 
   wire [8:0] flippedVideoX = io_video_regs_size_x - io_video_pos_x - 9'h001;
   wire [8:0] flippedVideoY = io_video_regs_size_y - io_video_pos_y - 9'h001;
-  wire       plegendsLayer2PrimeCycle =
-    io_gameConfig_plegends &
-    ~io_video_displayEnable &
-    (io_video_pos_x == 9'h1ff) &
-    (io_video_pos_y < io_video_regs_size_y);
   wire [8:0] layerVideoPosX = io_spriteCtrl_pwrinst2 ? (io_video_pos_x + 9'h070) : io_video_pos_x;
-  wire [8:0] layer2VideoPosX = plegendsLayer2PrimeCycle ? 9'h070 : layerVideoPosX;
+  wire [8:0] layer2VideoPosX =
+    io_gameConfig_plegends ? (layerVideoPosX + 9'h001) : layerVideoPosX;
   wire [17:0] videoX = {9'h000, io_video_pos_x};
   wire [17:0] videoY = {9'h000, io_video_pos_y};
   wire [17:0] videoSizeX = {9'h000, io_video_regs_size_x};
@@ -202,7 +202,37 @@ module GPU(
   reg [17:0] systemFramebufferAddrReg;
   reg [31:0] systemFramebufferDinReg;
 
-  wire activeDisplayPixel = io_video_clockEnable & io_video_displayEnable;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg ssHoldVideo0;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg ssHoldVideo1;
+  reg ssCanonicalRequestReg;
+  reg ssCanonicalToggleSystem;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg ssCanonicalToggleVideo0;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg ssCanonicalToggleVideo1;
+  reg ssCanonicalToggleVideoSeen;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg ssVideoWriterIdleSystem0;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg ssVideoWriterIdleSystem1;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg ssFrameBuiltSystem0;
+  (* preserve, useioff = 0, altera_attribute = {"-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS"} *)
+  reg ssFrameBuiltSystem1;
+  reg ssFrameHadWriteVideo;
+  reg ssFrameBuiltVideo;
+  reg ssVideoVBlankPrev;
+
+  wire ssVideoCanonicalPulse =
+    ssCanonicalToggleVideo1 != ssCanonicalToggleVideoSeen;
+  wire ssVideoRenderEnable = ~ssHoldVideo1;
+  wire ssVideoWriterIdle = ssHoldVideo1 & ~systemFramebufferWrReg;
+  wire spriteProcessorIdle;
+
+  wire activeDisplayPixel =
+    io_video_clockEnable & io_video_displayEnable & ssVideoRenderEnable;
   wire [63:0] spriteDebug;
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
   wire [3:0]  mixerDebugSelectedPen;
@@ -284,10 +314,61 @@ module GPU(
       : debugFillRgb;
 `endif
 
+  always @(posedge clock) begin
+    if (reset) begin
+      ssCanonicalRequestReg <= 1'b0;
+      ssCanonicalToggleSystem <= 1'b0;
+      ssVideoWriterIdleSystem0 <= 1'b0;
+      ssVideoWriterIdleSystem1 <= 1'b0;
+      ssFrameBuiltSystem0 <= 1'b0;
+      ssFrameBuiltSystem1 <= 1'b0;
+    end
+    else begin
+      ssCanonicalRequestReg <= io_ss_canonicalize;
+      if (io_ss_canonicalize & ~ssCanonicalRequestReg)
+        ssCanonicalToggleSystem <= ~ssCanonicalToggleSystem;
+
+      ssVideoWriterIdleSystem0 <= ssVideoWriterIdle;
+      ssVideoWriterIdleSystem1 <= ssVideoWriterIdleSystem0;
+      if (io_ss_canonicalize) begin
+        ssFrameBuiltSystem0 <= 1'b0;
+        ssFrameBuiltSystem1 <= 1'b0;
+      end
+      else begin
+        ssFrameBuiltSystem0 <= ssFrameBuiltVideo;
+        ssFrameBuiltSystem1 <= ssFrameBuiltSystem0;
+      end
+    end
+  end
+
   always @(posedge io_videoClock) begin
-    systemFramebufferWrReg <= activeDisplayPixel;
-    systemFramebufferAddrReg <= nextSystemFramebufferAddr;
-    systemFramebufferDinReg <= {8'h00, framebufferRgb888};
+    if (reset) begin
+      ssHoldVideo0 <= 1'b0;
+      ssHoldVideo1 <= 1'b0;
+      ssCanonicalToggleVideo0 <= 1'b0;
+      ssCanonicalToggleVideo1 <= 1'b0;
+      ssCanonicalToggleVideoSeen <= 1'b0;
+    end
+    else begin
+      ssHoldVideo0 <= io_ss_hold;
+      ssHoldVideo1 <= ssHoldVideo0;
+      ssCanonicalToggleVideo0 <= ssCanonicalToggleSystem;
+      ssCanonicalToggleVideo1 <= ssCanonicalToggleVideo0;
+      ssCanonicalToggleVideoSeen <= ssCanonicalToggleVideo1;
+    end
+  end
+
+  always @(posedge io_videoClock) begin
+    if (reset | ssVideoCanonicalPulse) begin
+      systemFramebufferWrReg <= 1'b0;
+      systemFramebufferAddrReg <= 18'd0;
+      systemFramebufferDinReg <= 32'd0;
+    end
+    else begin
+      systemFramebufferWrReg <= activeDisplayPixel;
+      systemFramebufferAddrReg <= nextSystemFramebufferAddr;
+      systemFramebufferDinReg <= {8'h00, framebufferRgb888};
+    end
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
     if (io_video_clockEnable) begin
       debugSpriteVisibleReg <= io_video_displayEnable & (|spritePenColor);
@@ -379,13 +460,36 @@ module GPU(
 `endif
   end
 
+  always @(posedge io_videoClock) begin
+    if (reset | ssVideoCanonicalPulse) begin
+      ssFrameHadWriteVideo <= 1'b0;
+      ssFrameBuiltVideo <= 1'b0;
+      ssVideoVBlankPrev <= io_video_vBlank;
+    end
+    else begin
+      ssVideoVBlankPrev <= io_video_vBlank;
+      if (ssHoldVideo1) begin
+        ssFrameHadWriteVideo <= 1'b0;
+        ssFrameBuiltVideo <= 1'b0;
+      end
+      else begin
+        if (systemFramebufferWrReg)
+          ssFrameHadWriteVideo <= 1'b1;
+        if (io_video_vBlank & ~ssVideoVBlankPrev) begin
+          ssFrameBuiltVideo <= ssFrameHadWriteVideo;
+          ssFrameHadWriteVideo <= 1'b0;
+        end
+      end
+    end
+  end
+
   SpriteProcessor spriteProcessor (
     .clock                       (clock),
-    .reset                       (reset),
+    .reset                       (reset | io_ss_canonicalize),
     .io_ctrl_enable              (io_spriteCtrl_enable),
     .io_ctrl_format              (io_spriteCtrl_format),
     .io_ctrl_pwrinst2            (io_spriteCtrl_pwrinst2),
-    .io_ctrl_start               (io_spriteCtrl_start),
+    .io_ctrl_start               (io_spriteCtrl_start & ~io_ss_hold),
     .io_ctrl_zoom                (io_spriteCtrl_zoom),
     .io_ctrl_regs_bank           (io_spriteCtrl_regs_bank),
     .io_ctrl_regs_fixed          (io_spriteCtrl_regs_fixed),
@@ -407,6 +511,7 @@ module GPU(
     .io_frameBuffer_din          (io_spriteFrameBuffer_din),
     .io_frameBuffer_wait_n       (io_spriteFrameBuffer_wait_n),
     .io_ctrl_frameReady          (io_spriteCtrl_frameReady),
+    .io_ss_idle                  (spriteProcessorIdle),
     .io_debug                    (spriteDebug)
   );
 
@@ -415,9 +520,10 @@ module GPU(
     .LAYER_OFFSET_SMALL (5'h0A)
   ) layerProcessor_0 (
     .clock                        (io_videoClock),
-    .io_ctrl_enable               (io_layerCtrl_0_enable),
+    .io_ctrl_enable               (io_layerCtrl_0_enable & ssVideoRenderEnable),
     .io_ctrl_format               (io_layerCtrl_0_format),
     .io_ctrl_zero4bppPenF         (1'b0),
+    .io_ctrl_pwrinst2             (io_spriteCtrl_pwrinst2),
     .io_ctrl_regs_tileSize        (io_layerCtrl_0_regs_tileSize),
     .io_ctrl_regs_enable          (io_layerCtrl_0_regs_enable),
     .io_ctrl_regs_flipX           (io_layerCtrl_0_regs_flipX),
@@ -458,9 +564,10 @@ module GPU(
     .LAYER_OFFSET_SMALL (5'h09)
   ) layerProcessor_1 (
     .clock                        (io_videoClock),
-    .io_ctrl_enable               (io_layerCtrl_1_enable),
+    .io_ctrl_enable               (io_layerCtrl_1_enable & ssVideoRenderEnable),
     .io_ctrl_format               (io_layerCtrl_1_format),
     .io_ctrl_zero4bppPenF         (1'b0),
+    .io_ctrl_pwrinst2             (io_spriteCtrl_pwrinst2),
     .io_ctrl_regs_tileSize        (io_layerCtrl_1_regs_tileSize),
     .io_ctrl_regs_enable          (io_layerCtrl_1_regs_enable),
     .io_ctrl_regs_flipX           (io_layerCtrl_1_regs_flipX),
@@ -501,9 +608,10 @@ module GPU(
     .LAYER_OFFSET_SMALL (5'h08)
   ) layerProcessor_2 (
     .clock                        (io_videoClock),
-    .io_ctrl_enable               (io_layerCtrl_2_enable),
+    .io_ctrl_enable               (io_layerCtrl_2_enable & ssVideoRenderEnable),
     .io_ctrl_format               (io_layerCtrl_2_format),
     .io_ctrl_zero4bppPenF         (io_spriteCtrl_pwrinst2),
+    .io_ctrl_pwrinst2             (io_spriteCtrl_pwrinst2),
     .io_ctrl_regs_tileSize        (io_layerCtrl_2_regs_tileSize),
     .io_ctrl_regs_enable          (io_layerCtrl_2_regs_enable),
     .io_ctrl_regs_flipX           (io_layerCtrl_2_regs_flipX),
@@ -544,9 +652,10 @@ module GPU(
     .LAYER_OFFSET_SMALL (5'h08)
   ) pwrinst2Layer2Processor (
     .clock                        (io_videoClock),
-    .io_ctrl_enable               (io_pwrinst2Layer2_enable),
+    .io_ctrl_enable               (io_pwrinst2Layer2_enable & ssVideoRenderEnable),
     .io_ctrl_format               (2'h1),
     .io_ctrl_zero4bppPenF         (1'b0),
+    .io_ctrl_pwrinst2             (io_spriteCtrl_pwrinst2),
     .io_ctrl_regs_tileSize        (io_pwrinst2Layer2_regs_tileSize),
     .io_ctrl_regs_enable          (io_pwrinst2Layer2_regs_enable),
     .io_ctrl_regs_flipX           (io_pwrinst2Layer2_regs_flipX),
@@ -624,6 +733,9 @@ module GPU(
   assign io_systemFrameBuffer_addr = systemFramebufferAddrReg[16:0];
   assign io_systemFrameBuffer_din = systemFramebufferDinReg;
   assign io_rgb = videoRgb888;
+  assign io_ss_idle = spriteProcessorIdle & ssVideoWriterIdleSystem1;
+  assign io_ss_reconstruction_ready =
+    io_spriteCtrl_frameReady & ssFrameBuiltSystem1;
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
   wire [63:0] gpuFlashDebug = {
     debugFlashMismatchHistory,

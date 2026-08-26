@@ -9,6 +9,10 @@ module NMK112(
   input         io_cpu_wr,
   input  [22:0] io_cpu_addr,
   input  [15:0] io_cpu_din,
+  input         io_ss_wr,
+  input  [2:0]  io_ss_addr,
+  input  [5:0]  io_ss_din,
+  output [47:0] io_ss_state,
   input  [24:0] io_addr_0_in,
   output [24:0] io_addr_0_out,
   input  [24:0] io_addr_1_in,
@@ -37,6 +41,18 @@ module NMK112(
       page_1_1 <= 6'h00;
       page_1_2 <= 6'h00;
       page_1_3 <= 6'h00;
+    end
+    else if (io_ss_wr) begin
+      case (io_ss_addr)
+        3'd0: page_0_0 <= io_ss_din;
+        3'd1: page_0_1 <= io_ss_din;
+        3'd2: page_0_2 <= io_ss_din;
+        3'd3: page_0_3 <= io_ss_din;
+        3'd4: page_1_0 <= io_ss_din;
+        3'd5: page_1_1 <= io_ss_din;
+        3'd6: page_1_2 <= io_ss_din;
+        default: page_1_3 <= io_ss_din;
+      endcase
     end
     else if (io_cpu_wr) begin
       if (!cpu_chip) begin
@@ -83,4 +99,14 @@ module NMK112(
 
   assign io_addr_0_out = {3'h0, chip_0_page, io_addr_0_in[15:0]};
   assign io_addr_1_out = {3'h0, chip_1_page, io_addr_1_in[15:0]};
+  assign io_ss_state = {
+    page_1_3,
+    page_1_2,
+    page_1_1,
+    page_1_0,
+    page_0_3,
+    page_0_2,
+    page_0_1,
+    page_0_0
+  };
 endmodule
